@@ -16,6 +16,7 @@ enum PlayState { idle, playing, paused }
 /// App全局状态管理
 class AppState extends ChangeNotifier {
   final AudioPlayer _player = AudioPlayer();
+  final Record _recorder = Record();
 
   late SharedPreferences _prefs;
   late Directory _recordingsDir;
@@ -153,7 +154,7 @@ class AppState extends ChangeNotifier {
     }
 
     // Check permission
-    if (!await Record.hasPermission()) {
+    if (!await _recorder.hasPermission()) {
       return false;
     }
 
@@ -165,10 +166,9 @@ class AppState extends ChangeNotifier {
       oldFile.deleteSync();
     }
 
-    await Record.start(
+    await _recorder.start(
       encoder: AudioEncoder.aacLc,
       bitRate: 128000,
-      sampleRate: 44100,
       path: path,
     );
 
@@ -193,7 +193,7 @@ class AppState extends ChangeNotifier {
   Future<String?> stopRecording() async {
     if (!_isRecording) return null;
     final recordedPhraseId = _recordingPhraseId;
-    final path = await Record.stop();
+    final path = await _recorder.stop();
     _recordingTimerSub?.cancel();
     _isRecording = false;
     _recordingPhraseId = null;
@@ -237,6 +237,7 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _player.dispose();
+    _recorder.dispose();
     _recordingTimerSub?.cancel();
     super.dispose();
   }
