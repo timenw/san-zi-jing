@@ -10,14 +10,11 @@ dependencies:
   flutter:
     sdk: flutter
   just_audio: ^0.9.39
-  record: ^5.2.0
+  record: ^4.4.4
   shared_preferences: ^2.2.3
   provider: ^6.1.2
   path_provider: ^2.1.5
   collection: ^1.18.0
-
-dependency_overrides:
-  record_linux: ^0.8.0
 
 dev_dependencies:
   flutter_test:
