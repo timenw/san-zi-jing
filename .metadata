@@ -1,0 +1,10 @@
+version:
+  revision: "unknown"
+  channel: "stable"
+
+project_type: app
+
+migration:
+  platforms:
+    - android
+  revision: "unknown"
