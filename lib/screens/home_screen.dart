@@ -18,7 +18,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
     const phrases = SanZiJingData.phrases;
-    const sections = SanZiJingData.sections;
+    final sections = SanZiJingData.sections;
     final currentSection = sections[_currentIndex];
     final sectionPhrases = SanZiJingData.grouped[currentSection]!;
 
