@@ -6,7 +6,7 @@ pluginManagement {
         assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
         return flutterSdkPath
     }
-    settings()
+    includeBuild("${flutterSdkPath}/packages/flutter_tools/gradle")
 
     plugins {
         id "dev.flutter.flutter-plugin-loader" version "1.0.0"
