@@ -5,7 +5,7 @@ import 'screens/home_screen.dart';
 import 'screens/reader_screen.dart';
 import 'screens/about_screen.dart';
 import 'models/phrase.dart';
-import 'data/san_zi_jing_data.dart';
+
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();

@@ -17,8 +17,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
-    final phrases = SanZiJingData.phrases;
-    final sections = SanZiJingData.sections;
+    const phrases = SanZiJingData.phrases;
+    const sections = SanZiJingData.sections;
     final currentSection = sections[_currentIndex];
     final sectionPhrases = SanZiJingData.grouped[currentSection]!;
 
@@ -157,7 +157,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildPhrasePairCard(Phrase phrase1, Phrase? phrase2, AppState appState) {
-    final hasAi1 = true;
+    const hasAi1 = true;
     final hasParent1 = appState.hasRecording(phrase1.id, TrackType.parent);
     final hasChild1 = appState.hasRecording(phrase1.id, TrackType.child);
 
