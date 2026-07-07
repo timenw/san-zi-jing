@@ -6,6 +6,20 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+// Align the Android Gradle Plugin to a single version across ALL modules,
+// including the hard-coded buildscript{ classpath } declarations inside
+// Flutter plugin subprojects (e.g. path_provider_android=8.5.0,
+// shared_preferences_android=8.5.1). AGP 8.x forbids mixing versions in one
+// build, so force the artifact to 8.5.2 everywhere.
+allprojects {
+    configurations.all {
+        resolutionStrategy {
+            force("com.android.tools.build:gradle:8.5.2")
+            force("com.android.tools.build:gradle-api:8.5.2")
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }

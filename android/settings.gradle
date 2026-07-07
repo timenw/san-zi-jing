@@ -14,15 +14,6 @@ pluginManagement {
         gradlePluginPortal()
     }
 
-    // Force a single Android Gradle Plugin version across ALL modules, including
-    // the hardcoded buildscript{ classpath } in Flutter plugin subprojects
-    // (path_provider_android=8.5.0, shared_preferences_android=8.5.1). AGP 8.x
-    // forbids mixing versions in one build, so align every module to 8.5.2.
-    resolutionStrategy {
-        force("com.android.tools.build:gradle:8.5.2")
-        force("com.android.tools.build:gradle-api:8.5.2")
-    }
-
     plugins {
         id "dev.flutter.flutter-plugin-loader" version "1.0.0"
         id "com.android.application" version "8.5.2" apply false
