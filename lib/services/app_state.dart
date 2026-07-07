@@ -1,27 +1,25 @@
 import 'dart:async';
-import 'package:flutter_tts/flutter_tts.dart';
+import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
-import 'dart:io';
 
 enum PlayState { stopped, playing, paused }
 
+/// AI 配音走原生 Android TextToSpeech（平台通道），避免 flutter_tts 旧插件
+/// 在 Flutter 现代 Gradle 插件加载器下的不兼容；其余平台安全降级为无操作。
 class AppState {
-  final FlutterTts tts = FlutterTts();
+  static const _tts = MethodChannel('com.timenw.sanzijing/tts');
   final AudioRecorder recorder = AudioRecorder();
-  final AudioPlayer aiPlayer = AudioPlayer();
   final AudioPlayer parentPlayer = AudioPlayer();
   final AudioPlayer childPlayer = AudioPlayer();
 
-  // 最近一次录音文件路径（孩子 / 家长）
   String? _childPath;
   String? _parentPath;
-
   String? get childPath => _childPath;
   String? get parentPath => _parentPath;
-
   bool _ttsReady = false;
 
   AppState() {
@@ -29,22 +27,34 @@ class AppState {
   }
 
   Future<void> _initTts() async {
-    await tts.setLanguage('zh-CN');
-    await tts.setSpeechRate(0.45); // 慢速，适合跟读
-    await tts.setPitch(1.0);
-    _ttsReady = true;
+    try {
+      await _tts.invokeMethod('init', {'rate': 0.6});
+      _ttsReady = true;
+    } on PlatformException {
+      _ttsReady = false;
+    }
   }
 
-  /// AI 配音：朗读指定句子（实时 TTS，无需音频文件）。
+  /// AI 配音：经原生 TTS 朗读指定句子。
   Future<void> speakAi(String text) async {
     if (!_ttsReady) await _initTts();
-    await tts.stop();
-    await tts.speak(text);
+    if (!_ttsReady) return;
+    try {
+      await _tts.invokeMethod('speak', {'text': text});
+    } on PlatformException {
+      // 平台不支持时静默降级
+    }
   }
 
-  Future<void> stopAi() async => tts.stop();
+  Future<void> stopAi() async {
+    try {
+      await _tts.invokeMethod('stop');
+    } on PlatformException {
+      // ignore
+    }
+  }
 
-  /// 录音（家长或孩子）。返回保存路径；record 6.x 用 RecordConfig。
+  /// 录音（家长或孩子）。record 6.x：start(RecordConfig, path)。
   Future<String> startRecording(String who) async {
     if (await recorder.isRecording()) await recorder.stop();
     final dir = await getApplicationDocumentsDirectory();
@@ -77,10 +87,9 @@ class AppState {
     _parentPath = sp.getString('last_parent_rec');
   }
 
-  /// 三轨对比播放：依次播放 AI(朗读) / 家长 / 孩子。分别在三个 Player 切换。
+  /// 三轨对比：AI 朗读 ->（可选）家长录音 -> 孩子录音。
   Future<void> playCompare(String sentence, {bool hasParent = false}) async {
     await stopCompare();
-    await tts.stop();
     await speakAi(sentence);
     await Future.delayed(const Duration(milliseconds: 200));
     if (hasParent && _parentPath != null) {
@@ -99,14 +108,13 @@ class AppState {
   }
 
   Future<void> stopCompare() async {
-    await tts.stop();
+    await stopAi();
     await parentPlayer.stop();
     await childPlayer.stop();
   }
 
   void dispose() {
-    tts.stop();
-    aiPlayer.dispose();
+    stopAi();
     parentPlayer.dispose();
     childPlayer.dispose();
     recorder.dispose();
