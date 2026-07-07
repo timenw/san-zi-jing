@@ -23,6 +23,7 @@ dev_dependencies:
 
 dependency_overrides:
   audio_session: 0.1.21
+  path_provider_android: 2.2.3
 
 flutter:
   uses-material-design: true
