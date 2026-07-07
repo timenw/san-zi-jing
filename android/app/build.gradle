@@ -25,7 +25,10 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace = "com.timenw.sanzijing"
     compileSdk = 35
-    ndkVersion = flutter.ndkVersion
+    // Plugins (just_audio, audio_session, path_provider_android, record_android,
+    // shared_preferences_android) require NDK 26.1.10909125. Flutter 3.24.5's
+    // default ndkVersion (23.1.7779620) is too low and aborts the build.
+    ndkVersion = "26.1.10909125"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
