@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'services/app_state.dart';
-import 'models/san_zi_jing.dart';
+import '../services/app_state.dart';
+import '../models/san_zi_jing.dart';
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});

@@ -28,7 +28,7 @@ class AppState {
     _initTts();
   }
 
-  void _initTts() async {
+  Future<void> _initTts() async {
     await tts.setLanguage('zh-CN');
     await tts.setSpeechRate(0.45); // 慢速，适合跟读
     await tts.setPitch(1.0);

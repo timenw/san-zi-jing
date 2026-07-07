@@ -11,7 +11,7 @@ class Section {
 }
 
 class SanZiJingData {
-  static const List<Section> sections = [
+  static final List<Section> sections = [
     Section('一、人之初', [
       Verse('人之初，性本善。性相近，习相远。'),
       Verse('苟不教，性乃迁。教之道，贵以专。'),
