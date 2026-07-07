@@ -16,7 +16,7 @@ enum PlayState { idle, playing, paused }
 /// App全局状态管理
 class AppState extends ChangeNotifier {
   final AudioPlayer _player = AudioPlayer();
-  final AudioRecorder _recorder = AudioRecorder();
+  final Record _recorder = Record();
 
   late SharedPreferences _prefs;
   late Directory _recordingsDir;
