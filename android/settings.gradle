@@ -15,14 +15,14 @@ pluginManagement {
     }
 
     // Force a single AGP version across the whole build. Several Flutter
-    // plugins (path_provider_android 2.2.15, shared_preferences_android)
-    // apply com.android.library with conflicting versions (8.5.0 vs 8.5.1),
-    // which trips "Using different versions of the Android Gradle plugin ...
-    // is not allowed". Pinning both application+library to one version fixes it.
+    // plugins (path_provider_android 2.2.15) apply com.android.library with a
+    // hardcoded AGP 8.5.0, while others would pull 8.5.1. The two can't
+    // coexist ("Using different versions of the Android Gradle plugin ... is
+    // not allowed"). Pinning both application+library to 8.5.0 resolves it.
     resolutionStrategy {
         eachPlugin {
             if (requested.id.id == 'com.android.application' || requested.id.id == 'com.android.library') {
-                useVersion("8.5.1")
+                useVersion("8.5.0")
             }
         }
     }
