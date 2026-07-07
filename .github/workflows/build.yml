@@ -24,6 +24,7 @@ jobs:
         with:
           channel: 'stable'
           flutter-version: '3.24.5'
+          cache: true
 
       - name: Get dependencies
         run: flutter pub get
@@ -32,7 +33,7 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --stacktrace
 
       - name: Rename APK
         run: |
@@ -47,7 +48,7 @@ jobs:
           retention-days: 90
 
       - name: Create GitHub Release
-        if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           files: build/app/outputs/flutter-apk/san_zi_jing-release.apk
