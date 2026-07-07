@@ -1,5 +1,5 @@
 name: san_zi_jing
-description: 亲子共读三字经 - AI配音+家长孩子跟读录音三轨比对
+description: 亲子共读三字经 - AI配音朗读 + 家长孩子跟读录音对比
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -9,23 +9,23 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  just_audio: 0.9.36
-  record: ^4.4.4
-  shared_preferences: ^2.2.3
   provider: ^6.1.2
+  just_audio: 0.10.6
+  record: ^6.1.0
+  flutter_tts: ^4.2.0
+  shared_preferences: ^2.2.3
   path_provider: ^2.1.5
-  collection: ^1.18.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
 
+# 强制两个 AGP 8.x 平台插件降级到 7.x（更旧，在 AGP 8.5.2 下被兼容），
+# 避免 AGP 8.x 对同一构建中插件版本不一致报错。
 dependency_overrides:
   path_provider_android: 2.2.3
   shared_preferences_android: 2.3.1
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/audio/ai/

@@ -1,244 +1,114 @@
 import 'dart:async';
-import 'dart:io';
-import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
-import '../models/phrase.dart';
+import 'dart:io';
 
-/// 三种录音角色
-enum TrackType { ai, parent, child }
+enum PlayState { stopped, playing, paused }
 
-/// 播放状态
-enum PlayState { idle, playing, paused }
+class AppState {
+  final FlutterTts tts = FlutterTts();
+  final AudioRecorder recorder = AudioRecorder();
+  final AudioPlayer aiPlayer = AudioPlayer();
+  final AudioPlayer parentPlayer = AudioPlayer();
+  final AudioPlayer childPlayer = AudioPlayer();
 
-/// App全局状态管理
-class AppState extends ChangeNotifier {
-  final AudioPlayer _player = AudioPlayer();
-  final Record _recorder = Record();
+  // 最近一次录音文件路径（孩子 / 家长）
+  String? _childPath;
+  String? _parentPath;
 
-  late SharedPreferences _prefs;
-  late Directory _recordingsDir;
+  String? get childPath => _childPath;
+  String? get parentPath => _parentPath;
 
-  // 当前播放的句号和轨道
-  int? _playingPhraseId;
-  TrackType? _playingTrack;
-  PlayState _playState = PlayState.idle;
+  bool _ttsReady = false;
 
-  // 录音状态
-  bool _isRecording = false;
-  int? _recordingPhraseId;
-  TrackType? _recordingTrack;
-  int _recordingSeconds = 0;
-
-  // 进度数据: practiced phrases
-  Set<int> _practiced = {};
-
-  bool _initialized = false;
-
-  PlayState get playState => _playState;
-  bool get isRecording => _isRecording;
-  int? get playingPhraseId => _playingPhraseId;
-  TrackType? get playingTrack => _playingTrack;
-  int? get recordingPhraseId => _recordingPhraseId;
-  TrackType? get recordingTrack => _recordingTrack;
-  int get recordingSeconds => _recordingSeconds;
-  Set<int> get practiced => _practiced;
-
-  /// 初始化
-  Future<void> init() async {
-    if (_initialized) return;
-    _prefs = await SharedPreferences.getInstance();
-    final docs = await getApplicationDocumentsDirectory();
-    _recordingsDir = Directory('${docs.path}/recordings');
-    if (!_recordingsDir.existsSync()) {
-      _recordingsDir.createSync(recursive: true);
-    }
-    // Load practiced set
-    _practiced = (_prefs.getStringList('practiced') ?? [])
-        .map((s) => int.tryParse(s) ?? -1)
-        .where((i) => i >= 0)
-        .toSet();
-
-    // Listen to player events
-    _player.playerStateStream.listen((state) {
-      if (state.playing) {
-        _playState = PlayState.playing;
-      } else if (state.processingState == ProcessingState.completed) {
-        _playState = PlayState.idle;
-        _playingPhraseId = null;
-        _playingTrack = null;
-        _player.stop();
-      } else {
-        _playState = PlayState.paused;
-      }
-      notifyListeners();
-    });
-
-    _initialized = true;
-    notifyListeners();
+  AppState() {
+    _initTts();
   }
 
-  /// 获取录音文件路径
-  String? _getRecordingPath(int phraseId, TrackType track) {
-    if (!_initialized) return null;
-    final role = track == TrackType.parent ? 'parent' : 'child';
-    return '${_recordingsDir.path}/${role}_${phraseId.toString().padLeft(3, '0')}.m4a';
+  void _initTts() async {
+    await tts.setLanguage('zh-CN');
+    await tts.setSpeechRate(0.45); // 慢速，适合跟读
+    await tts.setPitch(1.0);
+    _ttsReady = true;
   }
 
-  /// 检查录音是否存在
-  bool hasRecording(int phraseId, TrackType track) {
-    if (track == TrackType.ai) return true; // AI音频总是有
-    final path = _getRecordingPath(phraseId, track);
-    return path != null && File(path).existsSync();
+  /// AI 配音：朗读指定句子（实时 TTS，无需音频文件）。
+  Future<void> speakAi(String text) async {
+    if (!_ttsReady) await _initTts();
+    await tts.stop();
+    await tts.speak(text);
   }
 
-  /// 播放音频
-  Future<void> play(Phrase phrase, TrackType track) async {
-    // Stop recording if recording
-    if (_isRecording) {
-      await stopRecording();
-    }
+  Future<void> stopAi() async => tts.stop();
 
-    // If already playing this exact track, toggle pause
-    if (_playingPhraseId == phrase.id && _playingTrack == track) {
-      if (_playState == PlayState.playing) {
-        await _player.pause();
-      } else if (_playState == PlayState.paused) {
-        await _player.play();
-      }
-      return;
-    }
-
-    // Stop current playback
-    await _player.stop();
-
-    String source;
-    if (track == TrackType.ai) {
-      source = phrase.aiAudioPath;
-      await _player.setAsset(source);
-    } else {
-      final path = _getRecordingPath(phrase.id, track);
-      if (path == null || !File(path).existsSync()) return;
-      await _player.setFilePath(path);
-    }
-
-    _playingPhraseId = phrase.id;
-    _playingTrack = track;
-    _playState = PlayState.playing;
-    notifyListeners();
-
-    await _player.play();
-  }
-
-  /// 停止播放
-  Future<void> stopPlayback() async {
-    await _player.stop();
-    _playState = PlayState.idle;
-    _playingPhraseId = null;
-    _playingTrack = null;
-    notifyListeners();
-  }
-
-  /// 开始录音
-  Future<bool> startRecording(int phraseId, TrackType track) async {
-    if (track == TrackType.ai) return false; // AI轨道不能录
-
-    // Stop playback
-    await stopPlayback();
-
-    // Stop any existing recording
-    if (_isRecording) {
-      await stopRecording();
-    }
-
-    // Check permission
-    if (!await _recorder.hasPermission()) {
-      return false;
-    }
-
-    final path = _getRecordingPath(phraseId, track)!;
-
-    // Delete old recording if exists
-    final oldFile = File(path);
-    if (oldFile.existsSync()) {
-      oldFile.deleteSync();
-    }
-
-    await _recorder.start(
-      encoder: AudioEncoder.aacLc,
-      bitRate: 128000,
-      path: path,
+  /// 录音（家长或孩子）。返回保存路径；record 6.x 用 RecordConfig。
+  Future<String> startRecording(String who) async {
+    if (await recorder.isRecording()) await recorder.stop();
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/${who}_${DateTime.now().millisecondsSinceEpoch}.m4a');
+    await recorder.start(
+      const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 128000),
+      path: file.path,
     );
-
-    _isRecording = true;
-    _recordingPhraseId = phraseId;
-    _recordingTrack = track;
-    _recordingSeconds = 0;
-
-    // Start timer
-    _recordingTimerSub = Stream.periodic(const Duration(seconds: 1), (i) => i + 1).listen((sec) {
-      _recordingSeconds = sec;
-      notifyListeners();
-    });
-
-    notifyListeners();
-    return true;
+    return file.path;
   }
 
-  StreamSubscription<int>? _recordingTimerSub;
-
-  /// 停止录音
-  Future<String?> stopRecording() async {
-    if (!_isRecording) return null;
-    final recordedPhraseId = _recordingPhraseId;
-    final path = await _recorder.stop();
-    _recordingTimerSub?.cancel();
-    _isRecording = false;
-    _recordingPhraseId = null;
-    _recordingTrack = null;
-    _recordingSeconds = 0;
-
-    // Mark as practiced
-    if (recordedPhraseId != null) {
-      _practiced.add(recordedPhraseId);
-      _savePracticed();
+  Future<String?> stopRecording(String who) async {
+    final path = await recorder.stop();
+    if (path != null) {
+      if (who == 'child') _childPath = path;
+      if (who == 'parent') _parentPath = path;
+      await _saveLast(who, path);
     }
-
-    notifyListeners();
     return path;
   }
 
-  /// 删除录音
-  Future<void> deleteRecording(int phraseId, TrackType track) async {
-    if (track == TrackType.ai) return;
-    final path = _getRecordingPath(phraseId, track);
-    if (path != null) {
-      final file = File(path);
-      if (file.existsSync()) {
-        file.deleteSync();
-      }
-    }
-    // If currently playing this, stop
-    if (_playingPhraseId == phraseId && _playingTrack == track) {
-      await stopPlayback();
-    }
-    notifyListeners();
+  Future<void> _saveLast(String who, String path) async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString('last_${who}_rec', path);
   }
 
-  void _savePracticed() {
-    _prefs.setStringList('practiced', _practiced.map((i) => i.toString()).toList());
+  Future<void> loadLast() async {
+    final sp = await SharedPreferences.getInstance();
+    _childPath = sp.getString('last_child_rec');
+    _parentPath = sp.getString('last_parent_rec');
   }
 
-  /// 获取进度统计
-  int get totalPracticed => _practiced.length;
+  /// 三轨对比播放：依次播放 AI(朗读) / 家长 / 孩子。分别在三个 Player 切换。
+  Future<void> playCompare(String sentence, {bool hasParent = false}) async {
+    await stopCompare();
+    await tts.stop();
+    await speakAi(sentence);
+    await Future.delayed(const Duration(milliseconds: 200));
+    if (hasParent && _parentPath != null) {
+      await parentPlayer.setFilePath(_parentPath!);
+      await parentPlayer.play();
+    }
+  }
 
-  @override
+  Future<void> playFile(String who) async {
+    final path = who == 'child' ? _childPath : _parentPath;
+    if (path == null) return;
+    final p = who == 'child' ? childPlayer : parentPlayer;
+    await p.stop();
+    await p.setFilePath(path);
+    await p.play();
+  }
+
+  Future<void> stopCompare() async {
+    await tts.stop();
+    await parentPlayer.stop();
+    await childPlayer.stop();
+  }
+
   void dispose() {
-    _player.dispose();
-    _recorder.dispose();
-    _recordingTimerSub?.cancel();
-    super.dispose();
+    tts.stop();
+    aiPlayer.dispose();
+    parentPlayer.dispose();
+    childPlayer.dispose();
+    recorder.dispose();
   }
 }
