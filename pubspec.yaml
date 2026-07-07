@@ -21,13 +21,13 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
 
-# Force path_provider_android to 2.3.1 (a pure-Dart release with no AGP
-# classpath pin). The older 2.2.15 hardcodes AGP 8.5.0 while
-# shared_preferences_android pins 8.5.1; the two can't coexist and trip
+# Force shared_preferences_android down to 2.3.0. Versions >=2.4.0 hardcode
+# AGP 8.5.1 in their android/build.gradle, which clashes with
+# path_provider_android 2.2.15 (pins AGP 8.5.0) and trips
 # "Using different versions of the Android Gradle plugin ... is not allowed".
-# 2.3.1 drops its own build.gradle so only the 8.5.1 constraint remains.
+# 2.3.0 does not pin an AGP version, so it inherits the app's AGP 8.5.0.
 dependency_overrides:
-  path_provider_android: 2.3.1
+  shared_preferences_android: 2.3.0
 
 flutter:
   uses-material-design: true
