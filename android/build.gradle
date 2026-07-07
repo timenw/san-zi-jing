@@ -14,6 +14,7 @@ allprojects {
         configurations.classpath {
             resolutionStrategy {
                 force 'com.android.tools.build:gradle:8.5.0'
+                force 'com.android.tools.build:bundles:8.5.0'
             }
         }
     }
