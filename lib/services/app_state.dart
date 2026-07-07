@@ -16,7 +16,7 @@ enum PlayState { idle, playing, paused }
 /// App全局状态管理
 class AppState extends ChangeNotifier {
   final AudioPlayer _player = AudioPlayer();
-  final Record _recorder = Record();
+  final AudioRecorder _recorder = AudioRecorder();
 
   late SharedPreferences _prefs;
   late Directory _recordingsDir;
@@ -167,8 +167,11 @@ class AppState extends ChangeNotifier {
     }
 
     await _recorder.start(
-      encoder: AudioEncoder.aacLc,
-      bitRate: 128000,
+      RecordConfig(
+        encoder: AudioEncoder.aacLc,
+        bitRate: 128000,
+        sampleRate: 44100,
+      ),
       path: path,
     );
 
