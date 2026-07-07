@@ -33,7 +33,7 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build release APK
-        run: flutter build apk --release --verbose 2>&1 | tail -80
+        run: flutter build apk --release
 
       - name: Rename APK
         run: |

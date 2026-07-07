@@ -167,11 +167,8 @@ class AppState extends ChangeNotifier {
     }
 
     await _recorder.start(
-      RecordConfig(
-        encoder: AudioEncoder.aacLc,
-        bitRate: 128000,
-        sampleRate: 44100,
-      ),
+      encoder: AudioEncoder.aacLc,
+      bitRate: 128000,
       path: path,
     );
 
