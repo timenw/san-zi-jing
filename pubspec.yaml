@@ -20,11 +20,5 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
 
-# 强制两个 AGP 8.x 平台插件降级到 7.x（更旧，在 AGP 8.5.2 下被兼容），
-# 避免 AGP 8.x 对同一构建中插件版本不一致报错。
-dependency_overrides:
-  path_provider_android: 2.2.3
-  shared_preferences_android: 2.3.1
-
 flutter:
   uses-material-design: true
