@@ -1,3 +1,24 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // Force a single Android Gradle Plugin version across the whole build,
+        // including the legacy Flutter plugins (audio_session 8.1.0, just_audio
+        // 7.3.0, record 7.2.2, shared_preferences_android 7.2.2) that still
+        // declare `buildscript { classpath 'com.android.tools.build:gradle:X' }`.
+        // Without this, AGP's version-check aborts with
+        // "Using different versions of the Android Gradle plugin ... is not allowed".
+        classpath 'com.android.tools.build:gradle:8.5.0'
+    }
+    configurations.classpath {
+        resolutionStrategy {
+            force 'com.android.tools.build:gradle:8.5.0'
+        }
+    }
+}
+
 allprojects {
     repositories {
         google()
