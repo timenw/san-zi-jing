@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   provider: ^6.1.2
-  just_audio: 0.10.6
+  just_audio: 0.9.38
   record: ^6.1.0
   flutter_tts: ^4.2.0
   shared_preferences: ^2.2.3
