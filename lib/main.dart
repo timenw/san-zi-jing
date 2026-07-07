@@ -8,7 +8,7 @@ void main() async {
   final state = AppState();
   await state.loadLast();
   runApp(
-    ChangeNotifierProvider<AppState>.value(
+    Provider<AppState>.value(
       value: state,
       child: const MyApp(),
     ),
