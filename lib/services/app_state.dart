@@ -2,17 +2,16 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 
 enum PlayState { stopped, playing, paused }
 
 /// AI 配音走原生 Android TextToSpeech（平台通道），避免 flutter_tts 旧插件
-/// 在 Flutter 现代 Gradle 插件加载器下的不兼容；其余平台安全降级为无操作。
+/// 在 Flutter 现代 Gradle 插件加载器下不兼容；其余平台安全降级为无操作。
 class AppState {
   static const _tts = MethodChannel('com.timenw.sanzijing/tts');
-  final AudioRecorder recorder = AudioRecorder();
+  static const _rec = MethodChannel('com.timenw.sanzijing/recorder');
   final AudioPlayer parentPlayer = AudioPlayer();
   final AudioPlayer childPlayer = AudioPlayer();
 
@@ -21,9 +20,11 @@ class AppState {
   String? get childPath => _childPath;
   String? get parentPath => _parentPath;
   bool _ttsReady = false;
+  bool _recReady = false;
 
   AppState() {
     _initTts();
+    _initRecorder();
   }
 
   Future<void> _initTts() async {
@@ -32,6 +33,15 @@ class AppState {
       _ttsReady = true;
     } on PlatformException {
       _ttsReady = false;
+    }
+  }
+
+  Future<void> _initRecorder() async {
+    try {
+      await _rec.invokeMethod('init');
+      _recReady = true;
+    } on PlatformException {
+      _recReady = false;
     }
   }
 
@@ -54,20 +64,20 @@ class AppState {
     }
   }
 
-  /// 录音（家长或孩子）。record 6.x：start(RecordConfig, path)。
+  /// 录音（家长或孩子）。原生 MediaRecorder 录到文件，返回路径。
   Future<String> startRecording(String who) async {
-    if (await recorder.isRecording()) await recorder.stop();
+    if (!_recReady) await _initRecorder();
+    if (!_recReady) {
+      throw PlatformException(code: 'recorder_unavailable', message: '录音不可用');
+    }
     final dir = await getApplicationDocumentsDirectory();
-    final file = File('${dir.path}/${who}_${DateTime.now().millisecondsSinceEpoch}.m4a');
-    await recorder.start(
-      const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 128000),
-      path: file.path,
-    );
-    return file.path;
+    final path = '${dir.path}/${who}_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await _rec.invokeMethod('start', {'path': path});
+    return path;
   }
 
   Future<String?> stopRecording(String who) async {
-    final path = await recorder.stop();
+    final path = await _rec.invokeMethod<String>('stop');
     if (path != null) {
       if (who == 'child') _childPath = path;
       if (who == 'parent') _parentPath = path;
@@ -115,8 +125,12 @@ class AppState {
 
   void dispose() {
     stopAi();
+    try {
+      _rec.invokeMethod('stop');
+    } on PlatformException {
+      // ignore
+    }
     parentPlayer.dispose();
     childPlayer.dispose();
-    recorder.dispose();
   }
 }
