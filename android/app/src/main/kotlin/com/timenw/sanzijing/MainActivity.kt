@@ -45,14 +45,6 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
-    }
-
-    // 由 UtteranceProgressListener 在朗读完毕后回调 Flutter（通知 onDone）。
-    private fun notifyTtsDone() {
-        if (!speaking) return
-        speaking = false
-        ttsChannel?.invokeMethod("onDone", null)
-    }
 
         // ---- 录音通道：原生 MediaRecorder ----
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, REC_CHANNEL)
@@ -60,7 +52,8 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "init" -> result.success(null)
                     "start" -> {
-                        val path = call.argument<String>("path") ?: return@setMethodCallHandler result.error("no_path", "path required", null)
+                        val path = call.argument<String>("path")
+                            ?: return@setMethodCallHandler result.error("no_path", "path required", null)
                         startRecording(path)
                         result.success(null)
                     }
@@ -71,6 +64,14 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    // 由 UtteranceProgressListener 在朗读完毕后回调 Flutter（通知 onDone），
+    // 供 Dart 端串联顺序三轨对比。
+    private fun notifyTtsDone() {
+        if (!speaking) return
+        speaking = false
+        ttsChannel?.invokeMethod("onDone", null)
     }
 
     // ---------- TTS ----------
@@ -85,6 +86,7 @@ class MainActivity : FlutterActivity() {
                     override fun onDone(utteranceId: String?) {
                         notifyTtsDone()
                     }
+
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
                         notifyTtsDone()
@@ -121,7 +123,7 @@ class MainActivity : FlutterActivity() {
         return try {
             recorder?.stop()
             recorder?.release()
-            null
+            recordingPath
         } catch (_: Exception) {
             null
         } finally {
