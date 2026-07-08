@@ -1,15 +1,18 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
+import 'models/san_zi_jing.dart';
 
 enum PlayState { stopped, playing, paused }
 
 /// AI 配音走原生 Android TextToSpeech（平台通道），避免 flutter_tts 旧插件
 /// 在 Flutter 现代 Gradle 插件加载器下不兼容；其余平台安全降级为无操作。
-class AppState {
+/// 同时管理「已读 / 已录」学习进度，持久化到 SharedPreferences。
+class AppState extends ChangeNotifier {
   static const _tts = MethodChannel('com.timenw.sanzijing/tts');
   static const _rec = MethodChannel('com.timenw.sanzijing/recorder');
   final AudioPlayer parentPlayer = AudioPlayer();
@@ -21,6 +24,32 @@ class AppState {
   String? get parentPath => _parentPath;
   bool _ttsReady = false;
   bool _recReady = false;
+
+  /// 学习进度：以句子文本为稳定 key。
+  final Set<String> _readVerses = {};
+  final Set<String> _recordedVerses = {};
+  bool isRead(String verse) => _readVerses.contains(verse);
+  bool isRecorded(String verse) => _recordedVerses.contains(verse);
+  int get readCount => _readVerses.length;
+  int get recordedCount => _recordedVerses.length;
+  int get totalVerses => SanZiJingData.allVerses.length;
+
+  void toggleRead(String verse) {
+    if (_readVerses.contains(verse)) {
+      _readVerses.remove(verse);
+    } else {
+      _readVerses.add(verse);
+    }
+    _saveProgress();
+    notifyListeners();
+  }
+
+  void markRecorded(String verse) {
+    if (_recordedVerses.add(verse)) {
+      _saveProgress();
+      notifyListeners();
+    }
+  }
 
   AppState() {
     _initTts();
@@ -76,12 +105,13 @@ class AppState {
     return path;
   }
 
-  Future<String?> stopRecording(String who) async {
+  Future<String?> stopRecording(String who, {String? verse}) async {
     final path = await _rec.invokeMethod<String>('stop');
     if (path != null) {
       if (who == 'child') _childPath = path;
       if (who == 'parent') _parentPath = path;
       await _saveLast(who, path);
+      if (verse != null) markRecorded(verse);
     }
     return path;
   }
@@ -91,10 +121,18 @@ class AppState {
     await sp.setString('last_${who}_rec', path);
   }
 
+  Future<void> _saveProgress() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setStringList('read_verses', _readVerses.toList());
+    await sp.setStringList('recorded_verses', _recordedVerses.toList());
+  }
+
   Future<void> loadLast() async {
     final sp = await SharedPreferences.getInstance();
     _childPath = sp.getString('last_child_rec');
     _parentPath = sp.getString('last_parent_rec');
+    _readVerses.addAll(sp.getStringList('read_verses') ?? []);
+    _recordedVerses.addAll(sp.getStringList('recorded_verses') ?? []);
   }
 
   /// 三轨对比：AI 朗读 ->（可选）家长录音 -> 孩子录音。
