@@ -14,37 +14,39 @@ enum PlayState { stopped, playing, paused }
 class AppState extends ChangeNotifier {
   static const _tts = MethodChannel('com.timenw.sanzijing/tts');
   static const _rec = MethodChannel('com.timenw.sanzijing/recorder');
-  final AudioPlayer parentPlayer = AudioPlayer();
-  final AudioPlayer childPlayer = AudioPlayer();
+  final AudioPlayer player = AudioPlayer();
 
-  String? _childPath;
-  String? _parentPath;
-  String? get childPath => _childPath;
-  String? get parentPath => _parentPath;
+  // 每句独立的录音路径：key = verse.id，如 { 'v0_0': '/.../child_v0_0.m4a' }
+  final Map<String, String> _childRecs = {};
+  final Map<String, String> _parentRecs = {};
+
   bool _ttsReady = false;
   bool _recReady = false;
 
-  /// 学习进度：以句子文本为稳定 key。
+  // 学习进度：以句子稳定 id 为 key
   final Set<String> _readVerses = {};
   final Set<String> _recordedVerses = {};
-  bool isRead(String verse) => _readVerses.contains(verse);
-  bool isRecorded(String verse) => _recordedVerses.contains(verse);
+
+  String? childPathOf(String id) => _childRecs[id];
+  String? parentPathOf(String id) => _parentRecs[id];
+  bool isRead(String id) => _readVerses.contains(id);
+  bool isRecorded(String id) => _recordedVerses.contains(id);
   int get readCount => _readVerses.length;
   int get recordedCount => _recordedVerses.length;
-  int get totalVerses => SanZiJingData.allVerses.length;
+  int get totalVerses => SanZiJingData.total;
 
-  void toggleRead(String verse) {
-    if (_readVerses.contains(verse)) {
-      _readVerses.remove(verse);
+  void toggleRead(String id) {
+    if (_readVerses.contains(id)) {
+      _readVerses.remove(id);
     } else {
-      _readVerses.add(verse);
+      _readVerses.add(id);
     }
     _saveProgress();
     notifyListeners();
   }
 
-  void markRecorded(String verse) {
-    if (_recordedVerses.add(verse)) {
+  void markRecorded(String id) {
+    if (_recordedVerses.add(id)) {
       _saveProgress();
       notifyListeners();
     }
@@ -73,15 +75,36 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// AI 配音：经原生 TTS 朗读指定句子。
-  Future<void> speakAi(String text) async {
+  /// AI 配音：经原生 TTS 朗读指定句子。返回朗读是否真的发起。
+  Future<bool> speakAi(String text) async {
     if (!_ttsReady) await _initTts();
-    if (!_ttsReady) return;
+    if (!_ttsReady) return false;
     try {
       await _tts.invokeMethod('speak', {'text': text});
+      return true;
     } on PlatformException {
-      // 平台不支持时静默降级
+      return false;
     }
+  }
+
+  /// 注册 TTS 完成回调（原生朗读结束时触发），用于顺序三轨。
+  void onTtsDone(Future<void> Function() cb) {
+    _ttsDone = cb;
+    _ensureTtsCallbackRegistered();
+  }
+
+  Future<void> Function()? _ttsDone;
+  bool _ttsCbRegistered = false;
+
+  void _ensureTtsCallbackRegistered() {
+    if (_ttsCbRegistered) return;
+    _ttsCbRegistered = true;
+    _tts.setMethodCallHandler((call) async {
+      if (call.method == 'onDone') {
+        await _ttsDone?.call();
+      }
+      return;
+    });
   }
 
   Future<void> stopAi() async {
@@ -92,33 +115,40 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 录音（家长或孩子）。原生 MediaRecorder 录到文件，返回路径。
-  Future<String> startRecording(String who) async {
+  /// 录音（家长或孩子），按 verse.id 独立保存。
+  Future<String> startRecording(String who, String verseId) async {
     if (!_recReady) await _initRecorder();
     if (!_recReady) {
       throw PlatformException(code: 'recorder_unavailable', message: '录音不可用');
     }
     final dir = await getApplicationDocumentsDirectory();
-    final path = '${dir.path}/${who}_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    final path = '${dir.path}/${who}_$verseId.m4a';
     await _rec.invokeMethod('start', {'path': path});
     return path;
   }
 
-  Future<String?> stopRecording(String who, {String? verse}) async {
+  Future<String?> stopRecording(String who, String verseId) async {
     final path = await _rec.invokeMethod<String>('stop');
-    if (path != null) {
-      if (who == 'child') _childPath = path;
-      if (who == 'parent') _parentPath = path;
-      await _saveLast(who, path);
-      if (verse != null) markRecorded(verse);
+    if (path != null && path.isNotEmpty) {
+      if (who == 'child') {
+        _childRecs[verseId] = path;
+      } else {
+        _parentRecs[verseId] = path;
+      }
+      await _saveRecs();
+      markRecorded(verseId);
     }
     return path;
   }
 
-  Future<void> _saveLast(String who, String path) async {
+  Future<void> _saveRecs() async {
     final sp = await SharedPreferences.getInstance();
-    await sp.setString('last_${who}_rec', path);
+    await sp.setString('child_recs', _mapToJson(_childRecs));
+    await sp.setString('parent_recs', _mapToJson(_parentRecs));
   }
+
+  String _mapToJson(Map<String, String> m) =>
+      '{${m.entries.map((e) => '"${e.key}":"${e.value}"').join(',')}}';
 
   Future<void> _saveProgress() async {
     final sp = await SharedPreferences.getInstance();
@@ -128,36 +158,97 @@ class AppState extends ChangeNotifier {
 
   Future<void> loadLast() async {
     final sp = await SharedPreferences.getInstance();
-    _childPath = sp.getString('last_child_rec');
-    _parentPath = sp.getString('last_parent_rec');
     _readVerses.addAll(sp.getStringList('read_verses') ?? []);
     _recordedVerses.addAll(sp.getStringList('recorded_verses') ?? []);
+    _childRecs.addAll(_jsonToMap(sp.getString('child_recs')));
+    _parentRecs.addAll(_jsonToMap(sp.getString('parent_recs')));
   }
 
-  /// 三轨对比：AI 朗读 ->（可选）家长录音 -> 孩子录音。
-  Future<void> playCompare(String sentence, {bool hasParent = false}) async {
+  Map<String, String> _jsonToMap(String? s) {
+    final Map<String, String> out = {};
+    if (s == null || s.isEmpty) return out;
+    final body = s.substring(1, s.length - 1);
+    if (body.trim().isEmpty) return out;
+    for (final part in body.split(',')) {
+      final kv = part.split(':');
+      if (kv.length == 2) {
+        out[kv[0].trim().replaceAll('"', '')] =
+            kv[1].trim().replaceAll('"', '');
+      }
+    }
+    return out;
+  }
+
+  /// 三轨对比：AI 朗读 ->（可选）家长录音 -> 孩子录音，依次播放。
+  /// 用原生 TTS 完成回调串联，避免时长估算误差。
+  Future<void> playCompare(String verseId, {bool hasParent = false}) async {
     await stopCompare();
-    await speakAi(sentence);
-    await Future.delayed(const Duration(milliseconds: 200));
-    if (hasParent && _parentPath != null) {
-      await parentPlayer.setFilePath(_parentPath!);
-      await parentPlayer.play();
+    final verse = SanZiJingData.verseById(verseId);
+    final childPath = _childRecs[verseId];
+    final parentPath = _parentRecs[verseId];
+
+    final queue = <Future<void> Function()>[];
+    queue.add(() async {
+      final ok = await speakAi(verse.speakText);
+      // 若原生 TTS 不可用（非 Android），直接跳过该段。
+      final completer = Completer<void>();
+      if (!ok) {
+        completer.complete();
+      } else {
+        onTtsDone(() async => completer.complete());
+      }
+      await completer.future;
+    });
+    if (hasParent && parentPath != null) {
+      queue.add(() => _playFileThen(parentPath, null));
+    }
+    if (childPath != null) {
+      queue.add(() => _playFileThen(childPath, null));
+    }
+    await _runQueue(queue);
+  }
+
+  Future<void> _playFileThen(String path, void Function()? after) async {
+    try {
+      await player.stop();
+      await player.setFilePath(path);
+      await player.play();
+      final done = Completer<void>();
+      late final StreamSubscription sub;
+      sub = player.playerStateStream.listen((st) {
+        if (st.processingState == ProcessingState.completed) {
+          sub.cancel();
+          done.complete();
+        }
+      });
+      await done.future;
+    } on Exception {
+      // 文件可能已失效，忽略
     }
   }
 
-  Future<void> playFile(String who) async {
-    final path = who == 'child' ? _childPath : _parentPath;
+  Future<void> _runQueue(List<Future<void> Function()> queue) async {
+    for (final step in queue) {
+      await step();
+    }
+  }
+
+  Future<void> playFile(String who, String verseId) async {
+    final path =
+        who == 'child' ? _childRecs[verseId] : _parentRecs[verseId];
     if (path == null) return;
-    final p = who == 'child' ? childPlayer : parentPlayer;
-    await p.stop();
-    await p.setFilePath(path);
-    await p.play();
+    await player.stop();
+    await player.setFilePath(path);
+    await player.play();
   }
 
   Future<void> stopCompare() async {
     await stopAi();
-    await parentPlayer.stop();
-    await childPlayer.stop();
+    try {
+      await player.stop();
+    } on Exception {
+      // ignore
+    }
   }
 
   @override
@@ -168,8 +259,7 @@ class AppState extends ChangeNotifier {
     } on PlatformException {
       // ignore
     }
-    parentPlayer.dispose();
-    childPlayer.dispose();
+    player.dispose();
     super.dispose();
   }
 }

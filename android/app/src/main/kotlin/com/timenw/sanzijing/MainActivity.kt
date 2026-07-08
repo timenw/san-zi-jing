@@ -17,30 +17,42 @@ class MainActivity : FlutterActivity() {
     private var tts: TextToSpeech? = null
     private var recorder: MediaRecorder? = null
     private var recordingPath: String? = null
+    private var ttsChannel: MethodChannel? = null
+    private var speaking = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
         // ---- TTS 通道：原生 Android TextToSpeech ----
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TTS_CHANNEL)
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "init" -> {
-                        val rate = (call.argument<Double>("rate") ?: 1.0).toFloat()
-                        initTts(rate)
-                        result.success(null)
-                    }
-                    "speak" -> {
-                        speak(call.argument<String>("text") ?: "")
-                        result.success(null)
-                    }
-                    "stop" -> {
-                        tts?.stop()
-                        result.success(null)
-                    }
-                    else -> result.notImplemented()
+        val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TTS_CHANNEL)
+        ttsChannel = channel
+        channel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "init" -> {
+                    val rate = (call.argument<Double>("rate") ?: 1.0).toFloat()
+                    initTts(rate)
+                    result.success(null)
                 }
+                "speak" -> {
+                    speak(call.argument<String>("text") ?: "")
+                    result.success(null)
+                }
+                "stop" -> {
+                    tts?.stop()
+                    speaking = false
+                    result.success(null)
+                }
+                else -> result.notImplemented()
             }
+        }
+    }
+
+    // 由 UtteranceProgressListener 在朗读完毕后回调 Flutter（通知 onDone）。
+    private fun notifyTtsDone() {
+        if (!speaking) return
+        speaking = false
+        ttsChannel?.invokeMethod("onDone", null)
+    }
 
         // ---- 录音通道：原生 MediaRecorder ----
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, REC_CHANNEL)
@@ -68,12 +80,23 @@ class MainActivity : FlutterActivity() {
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.SIMPLIFIED_CHINESE
                 tts?.setSpeechRate(rate.coerceIn(0.1f, 2.0f))
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(utteranceId: String?) {
+                        notifyTtsDone()
+                    }
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) {
+                        notifyTtsDone()
+                    }
+                })
             }
         }
     }
 
     private fun speak(text: String) {
         if (tts == null) initTts(0.6f)
+        speaking = true
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sanzi")
     }
 
@@ -110,6 +133,7 @@ class MainActivity : FlutterActivity() {
         tts?.stop()
         tts?.shutdown()
         tts = null
+        ttsChannel = null
         stopRecording()
         super.onDestroy()
     }
