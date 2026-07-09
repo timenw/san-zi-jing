@@ -211,9 +211,9 @@ class AppState extends ChangeNotifier {
     final queue = <Future<void> Function()>[];
     queue.add(() async {
       final ok = await speakAi(verse.speakText);
-      // 若原生 TTS 不可用（非 Android），直接跳过该段。
+      // 若原生 TTS 不可用（非 Android 或缺中文语音），直接跳过该段。
       final completer = Completer<void>();
-      if (!ok) {
+      if (ok != SpeakResult.ok) {
         completer.complete();
       } else {
         onTtsDone(() async => completer.complete());
