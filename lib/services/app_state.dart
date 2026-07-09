@@ -18,6 +18,9 @@ class AppState extends ChangeNotifier {
   final Map<String, String> _childRecs = {};
   final Map<String, String> _parentRecs = {};
 
+  // 每句朗读音源：verseId -> 'system'(默认) / 'parent' / 'child'
+  final Map<String, String> _readSource = {};
+
   bool _recReady = false;
 
   // 学习进度：以句子稳定 id 为 key
@@ -50,6 +53,7 @@ class AppState extends ChangeNotifier {
 
   String? childPathOf(String id) => _childRecs[id];
   String? parentPathOf(String id) => _parentRecs[id];
+  String readSourceOf(String id) => _readSource[id] ?? 'system';
   bool isRead(String id) => _readVerses.contains(id);
   bool isRecorded(String id) => _recordedVerses.contains(id);
   int get readCount => _readVerses.length;
@@ -82,10 +86,37 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 朗读指定句子：播放预录语音包 assets/audio/<id>.mp3。
-  /// 返回 true=已发起播放；false=该句音频资源缺失。
+  /// 朗读指定句子。
+  /// 朗读音源优先级：用户设定的 readSource（parent/child 录音）> 系统预录包。
+  /// 若选定的人声录音缺失（如被删），回退播放系统预录 assets/audio/<id>.mp3。
+  /// 返回 true=已发起播放；false=连系统预录音也缺失。
   Future<bool> playVerse(String id) async {
     await player.stop();
+    final src = _readSource[id] ?? 'system';
+    if (src == 'parent' && _parentRecs[id] != null) {
+      _playingVerseId = id;
+      _playState = PlayState.playing;
+      notifyListeners();
+      try {
+        await player.setFilePath(_parentRecs[id]!);
+        await player.play();
+        return true;
+      } on Exception {
+        // 文件失效，回退系统音
+      }
+    } else if (src == 'child' && _childRecs[id] != null) {
+      _playingVerseId = id;
+      _playState = PlayState.playing;
+      notifyListeners();
+      try {
+        await player.setFilePath(_childRecs[id]!);
+        await player.play();
+        return true;
+      } on Exception {
+        // 文件失效，回退系统音
+      }
+    }
+    // 默认/回退：系统预录包
     try {
       await player.setAsset('assets/audio/$id.mp3');
     } on Exception {
@@ -97,13 +128,23 @@ class AppState extends ChangeNotifier {
     try {
       await player.play();
     } on Exception {
-      // 播放失败，重置状态
       _playState = PlayState.stopped;
       _playingVerseId = null;
       notifyListeners();
       return false;
     }
     return true;
+  }
+
+  /// 设置某句的朗读音源（system / parent / child），持久化。
+  void setReadSource(String id, String source) {
+    if (source == 'system') {
+      _readSource.remove(id);
+    } else {
+      _readSource[id] = source;
+    }
+    _saveReadSource();
+    notifyListeners();
   }
 
   Future<void> stopAudio() async {
@@ -149,10 +190,16 @@ class AppState extends ChangeNotifier {
     final sp = await SharedPreferences.getInstance();
     await sp.setString('child_recs', _mapToJson(_childRecs));
     await sp.setString('parent_recs', _mapToJson(_parentRecs));
+    await sp.setString('read_source', _mapToJson(_readSource));
   }
 
   String _mapToJson(Map<String, String> m) =>
       '{${m.entries.map((e) => '"${e.key}":"${e.value}"').join(',')}}';
+
+  Future<void> _saveReadSource() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString('read_source', _mapToJson(_readSource));
+  }
 
   Future<void> _saveProgress() async {
     final sp = await SharedPreferences.getInstance();
@@ -166,6 +213,7 @@ class AppState extends ChangeNotifier {
     _recordedVerses.addAll(sp.getStringList('recorded_verses') ?? []);
     _childRecs.addAll(_jsonToMap(sp.getString('child_recs')));
     _parentRecs.addAll(_jsonToMap(sp.getString('parent_recs')));
+    _readSource.addAll(_jsonToMap(sp.getString('read_source')));
   }
 
   Map<String, String> _jsonToMap(String? s) {
@@ -183,39 +231,22 @@ class AppState extends ChangeNotifier {
     return out;
   }
 
-  /// 三轨对比：预录朗读 ->（可选）家长录音 -> 孩子录音，依次播放。
-  Future<void> playCompare(String verseId, {bool hasParent = false}) async {
+  /// 亲子共读：先播放家长录音、再播放孩子录音，不再播放系统预录音。
+  /// 若某句只有孩子录音（无家长），则仅播孩子那段。
+  Future<void> playParentChild(String verseId) async {
     await stopAudio();
     final childPath = _childRecs[verseId];
     final parentPath = _parentRecs[verseId];
 
     final queue = <Future<void> Function()>[];
-    queue.add(() => _playAssetThen(verseId, null));
-    if (hasParent && parentPath != null) {
+    if (parentPath != null) {
       queue.add(() => _playFileThen(parentPath, null));
     }
     if (childPath != null) {
       queue.add(() => _playFileThen(childPath, null));
     }
+    if (queue.isEmpty) return;
     await _runQueue(queue);
-  }
-
-  Future<void> _playAssetThen(String id, void Function()? after) async {
-    final ok = await playVerse(id);
-    if (!ok) {
-      after?.call();
-      return;
-    }
-    final done = Completer<void>();
-    late final StreamSubscription sub;
-    sub = player.playerStateStream.listen((st) {
-      if (st.processingState == ProcessingState.completed) {
-        sub.cancel();
-        done.complete();
-      }
-    });
-    await done.future;
-    after?.call();
   }
 
   Future<void> _playFileThen(String path, void Function()? after) async {

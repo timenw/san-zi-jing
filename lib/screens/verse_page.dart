@@ -290,6 +290,39 @@ class _VersePageState extends State<VersePage> {
                               ),
                             ],
                           ),
+                          const SizedBox(height: 10),
+                          // 朗读音源：用户可把某句「朗读」设为家长/孩子录音
+                          const Text('朗读音源',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: GuoFeng.ink,
+                                  fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              _SourceChip(
+                                label: '系统',
+                                selected: state.readSourceOf(id) == 'system',
+                                onTap: () => state.setReadSource(id, 'system'),
+                              ),
+                              if (parentPath != null)
+                                _SourceChip(
+                                  label: '家长',
+                                  selected:
+                                      state.readSourceOf(id) == 'parent',
+                                  onTap: () => state.setReadSource(id, 'parent'),
+                                ),
+                              if (childPath != null)
+                                _SourceChip(
+                                  label: '孩子',
+                                  selected: state.readSourceOf(id) == 'child',
+                                  onTap: () => state.setReadSource(id, 'child'),
+                                ),
+                            ],
+                          ),
                           if (childPath != null || parentPath != null) ...[
                             const SizedBox(height: 12),
                             Wrap(
@@ -319,15 +352,14 @@ class _VersePageState extends State<VersePage> {
                                             height: 14,
                                             child: CircularProgressIndicator(
                                                 strokeWidth: 2))
-                                        : const Icon(Icons.compare_arrows,
+                                        : const Icon(Icons.family_restroom,
                                             size: 18),
-                                    label: const Text('三轨对比'),
+                                    label: const Text('亲子共读'),
                                     onPressed: _comparing
                                         ? null
                                         : () async {
                                             setState(() => _comparing = true);
-                                            await state.playCompare(id,
-                                                hasParent: parentPath != null);
+                                            await state.playParentChild(id);
                                             if (mounted) {
                                               setState(() => _comparing = false);
                                             }
@@ -420,6 +452,32 @@ class _NavBar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 朗读音源选择 chip（系统 / 家长 / 孩子）。
+class _SourceChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _SourceChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onTap(),
+      selectedColor: GuoFeng.cinnabar,
+      labelStyle: TextStyle(
+        color: selected ? GuoFeng.paper : GuoFeng.ink,
+        fontSize: 13,
+      ),
+      visualDensity: VisualDensity.compact,
     );
   }
 }
