@@ -21,6 +21,7 @@ class AppState extends ChangeNotifier {
   final Map<String, String> _parentRecs = {};
 
   bool _ttsReady = false;
+  bool _zhReady = false; // 中文语音包是否可用（很多设备引擎就绪却缺中文语音）
   bool _recReady = false;
 
   // 学习进度：以句子稳定 id 为 key
@@ -59,11 +60,14 @@ class AppState extends ChangeNotifier {
 
   Future<void> _initTts() async {
     try {
-      // 原生端现在会等 TextToSpeech 引擎真正就绪才返回（true/false）。
-      final ok = await _tts.invokeMethod<bool>('init', {'rate': 0.6});
-      _ttsReady = ok == true;
+      // 原生返回 {'tts': 引擎就绪?, 'zh': 中文语音可用?}
+      final r = await _tts.invokeMethod<Map<dynamic, dynamic>>(
+          'init', {'rate': 0.6});
+      _ttsReady = r?['tts'] == true;
+      _zhReady = r?['zh'] == true;
     } on PlatformException {
       _ttsReady = false;
+      _zhReady = false;
     }
   }
 
@@ -76,15 +80,29 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// AI 配音：经原生 TTS 朗读指定句子。返回朗读是否真的发起。
-  Future<bool> speakAi(String text) async {
+  /// AI 配音结果状态。
+  enum SpeakResult { ok, noEngine, noChinese }
+
+  /// AI 配音：经原生 TTS 朗读指定句子。
+  /// 返回 ok=已发起；noEngine=设备无 TTS 引擎；noChinese=缺中文语音包。
+  Future<SpeakResult> speakAi(String text) async {
     if (!_ttsReady) await _initTts();
-    if (!_ttsReady) return false;
+    if (!_ttsReady) return SpeakResult.noEngine;
+    if (!_zhReady) return SpeakResult.noChinese;
     try {
       await _tts.invokeMethod('speak', {'text': text});
-      return true;
+      return SpeakResult.ok;
     } on PlatformException {
-      return false;
+      return SpeakResult.noEngine;
+    }
+  }
+
+  /// 跳转系统 TTS 设置（引导安装中文语音包）。
+  Future<void> openTtsSettings() async {
+    try {
+      await _tts.invokeMethod('openSettings');
+    } on PlatformException {
+      // 设备无该设置页，忽略
     }
   }
 

@@ -1,6 +1,7 @@
 package com.timenw.sanzijing
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.speech.tts.TextToSpeech
@@ -31,15 +32,17 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
 
         // ---- TTS 通道：原生 Android TextToSpeech ----
-        // 关键修复：init 必须等 TextToSpeech 引擎真正就绪（onInit 回调）后才
-        // result.success，否则首次朗读时引擎仍为 null 而静音。
+        // init 返回 {'tts': 引擎是否就绪, 'zh': 中文语音是否可用}。
+        // 关键：很多设备引擎初始化成功却没装中文语音包，speak 会静默无声，
+        // 因此必须单独检测中文可用性，供 Dart 端给出「去安装语音」提示。
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TTS_CHANNEL)
         ttsChannel = channel
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "init" -> {
                     if (tts != null) {
-                        result.success(true)
+                        val zh = zhAvailable()
+                        result.success(mapOf("tts" to true, "zh" to zh))
                         return@setMethodCallHandler
                     }
                     val rate = (call.argument<Double>("rate") ?: 1.0).toFloat()
@@ -54,10 +57,11 @@ class MainActivity : FlutterActivity() {
                                 @Deprecated("Deprecated in Java")
                                 override fun onError(utteranceId: String?) { notifyTtsDone() }
                             })
-                            result.success(true)
+                            val zh = zhAvailable()
+                            result.success(mapOf("tts" to true, "zh" to zh))
                         } else {
                             tts = null
-                            result.success(false)
+                            result.success(mapOf("tts" to false, "zh" to false))
                         }
                     }
                 }
@@ -70,13 +74,22 @@ class MainActivity : FlutterActivity() {
                     speaking = false
                     result.success(null)
                 }
+                // 跳转系统 TTS 语音设置，引导用户安装中文语音包。
+                "openSettings" -> {
+                    try {
+                        startActivity(
+                            Intent().setAction("com.android.settings.TTS_SETTINGS")
+                        )
+                    } catch (_: Exception) {
+                        // 个别设备无该设置页，忽略
+                    }
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }
 
         // ---- 录音通道：原生 MediaRecorder ----
-        // 关键修复：Android 6.0+ 需在运行时申请 RECORD_AUDIO 权限，否则
-        // MediaRecorder.start() 抛 SecurityException，录音按钮点了无任何反馈。
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, REC_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -141,8 +154,12 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // 由 UtteranceProgressListener 在朗读完毕后回调 Flutter（通知 onDone），
-    // 供 Dart 端串联顺序三轨对比。
+    private fun zhAvailable(): Boolean {
+        val t = tts ?: return false
+        val avail = t.isLanguageAvailable(Locale.SIMPLIFIED_CHINESE)
+        return avail >= TextToSpeech.LANG_AVAILABLE
+    }
+
     private fun notifyTtsDone() {
         if (!speaking) return
         speaking = false

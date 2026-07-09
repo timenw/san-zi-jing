@@ -326,20 +326,27 @@ class _VerseTileState extends State<VerseTile> {
                   icon: const Icon(Icons.volume_up, size: 18),
                   label: const Text('AI朗读'),
                   onPressed: () async {
-                    try {
-                      final ok = await state.speakAi(widget.verse.speakText);
-                      if (!ok && context.mounted) {
+                    final res = await state.speakAi(widget.verse.speakText);
+                    if (!context.mounted) return;
+                    switch (res) {
+                      case AppState.SpeakResult.ok:
+                        break;
+                      case AppState.SpeakResult.noEngine:
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                              content: Text('该设备暂不支持 AI 朗读（TTS 不可用）')),
+                              content: Text('该设备暂不支持语音朗读（无 TTS 引擎）')),
                         );
-                      }
-                    } on PlatformException catch (e) {
-                      if (context.mounted) {
+                      case AppState.SpeakResult.noChinese:
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('朗读失败：${e.message}')),
+                          SnackBar(
+                            content: const Text('未安装中文语音包，朗读无声音'),
+                            action: SnackBarAction(
+                              label: '去安装',
+                              onPressed: () => state.openTtsSettings(),
+                            ),
+                            duration: const Duration(seconds: 6),
+                          ),
                         );
-                      }
                     }
                   },
                   style: FilledButton.styleFrom(
