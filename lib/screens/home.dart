@@ -329,14 +329,14 @@ class _VerseTileState extends State<VerseTile> {
                     final res = await state.speakAi(widget.verse.speakText);
                     if (!context.mounted) return;
                     switch (res) {
-                      case AppState.SpeakResult.ok:
+                      case SpeakResult.ok:
                         break;
-                      case AppState.SpeakResult.noEngine:
+                      case SpeakResult.noEngine:
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                               content: Text('该设备暂不支持语音朗读（无 TTS 引擎）')),
                         );
-                      case AppState.SpeakResult.noChinese:
+                      case SpeakResult.noChinese:
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: const Text('未安装中文语音包，朗读无声音'),

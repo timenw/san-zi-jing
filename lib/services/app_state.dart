@@ -8,6 +8,9 @@ import '../models/san_zi_jing.dart';
 
 enum PlayState { stopped, playing, paused }
 
+/// AI 配音结果状态。
+enum SpeakResult { ok, noEngine, noChinese }
+
 /// AI 配音走原生 Android TextToSpeech（平台通道），避免 flutter_tts 旧插件
 /// 在 Flutter 现代 Gradle 插件加载器下不兼容；其余平台安全降级为无操作。
 /// 同时管理「已读 / 已录」学习进度，持久化到 SharedPreferences。
@@ -79,9 +82,6 @@ class AppState extends ChangeNotifier {
       _recReady = false;
     }
   }
-
-  /// AI 配音结果状态。
-  enum SpeakResult { ok, noEngine, noChinese }
 
   /// AI 配音：经原生 TTS 朗读指定句子。
   /// 返回 ok=已发起；noEngine=设备无 TTS 引擎；noChinese=缺中文语音包。
