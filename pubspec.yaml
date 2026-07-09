@@ -1,7 +1,7 @@
 name: san_zi_jing
 description: 亲子共读三字经 - AI配音朗读 + 家长孩子跟读录音对比
 publish_to: 'none'
-version: 1.2.0+3
+version: 1.3.0+4
 
 environment:
   sdk: '>=3.2.0 <4.0.0'

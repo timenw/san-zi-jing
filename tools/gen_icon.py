@@ -1,135 +1,88 @@
 #!/usr/bin/env python3
-"""生成三字经国风启动图标（自适应前景/背景），输出 Android 各密度 mipmap PNG。
-纯矢量绘制（无中文字体依赖），用 cairosvg 渲染 SVG->PNG。
-背景：米黄纸色圆角方；前景：朱砂红「经」字（用笔画矩形模拟篆意，不依赖字体）。
+"""生成高质感国风印章图标（真实 CJK 字体渲染「经」字）。
+
+依赖: uvx cairosvg（无需 PIL/Flutter SDK）。
+输出: 各 density 的 ic_launcher(_round?).png 与
+      ic_launcher(_background|_foreground).png（自适应图标三层）。
 """
 import os
 import subprocess
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RES = os.path.join(ROOT, "android", "app", "src", "main", "res")
+FONT = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
+OUT = "/root/san-zi-jing/android/app/src/main/res"
+GLYPH = "经"
 
-# 各密度尺寸（px）
-DENSITIES = {
-    "mipmap-mdpi": 48,
-    "mipmap-hdpi": 72,
-    "mipmap-xhdpi": 96,
-    "mipmap-xxhdpi": 144,
-    "mipmap-xxxhdpi": 192,
-}
+# 配色（与 app 国风一致）
+PAPER = "#FAF6EF"      # 米黄纸色（背景）
+CINNABAR = "#B5402F"   # 朱砂红（印章）
+GOLD = "#C8923B"       # 赭石金（描边）
+WHITE = "#FDFBF6"      # 印面白字
 
-PAPER = "#FAF6EF"   # 米黄纸色
-CINNABAR = "#B5402F"  # 朱砂红
-OCHRE = "#C8923B"    # 赭石
+# 密度 -> px（mdpi 基准 48）
+DENS = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 
 
-def svg_bg(size: int) -> str:
-    s = size
-    # 圆角背景方（自适应图标背景层，108dp 视口，留安全边距）
-    r = s * 0.20
-    return f'''<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="{s}" height="{s}" viewBox="0 0 {s} {s}">
-  <rect x="0" y="0" width="{s}" height="{s}" rx="{r}" ry="{r}" fill="{PAPER}"/>
-</svg>'''
-
-
-def svg_fg(size: int) -> str:
-    s = size
-    cx, cy = s / 2, s / 2
-    # 「经」字用三横一竖的篆意笔画模拟（朱砂红），居中。
-    # 竖线（中央）
-    vw = s * 0.085
-    vx = cx - vw / 2
-    vtop = s * 0.20
-    vbot = s * 0.80
-    # 三横（顶部两横 + 底部一横形成「巠」上部意象）
-    hw = s * 0.46
-    hx = cx - hw / 2
-    h1y = s * 0.30
-    h2y = s * 0.42
-    h3y = s * 0.66
-    hh = s * 0.075
-    # 底部「工」意象：竖断开 + 横
-    # 左下短竖
-    sw = s * 0.07
-    sx = cx - hw / 2 + s * 0.02
-    st = s * 0.70
-    sb = s * 0.80
-    # 右下短竖
-    sx2 = cx + hw / 2 - sw - s * 0.02
-
-    rects = []
-    rects.append(f'<rect x="{vx}" y="{vtop}" width="{vw}" height="{vbot-vtop}" rx="{vw/2}" fill="{CINNABAR}"/>')
-    for hy in (h1y, h2y, h3y):
-        rects.append(f'<rect x="{hx}" y="{hy}" width="{hw}" height="{hh}" rx="{hh/2}" fill="{CINNABAR}"/>')
-    rects.append(f'<rect x="{sx}" y="{st}" width="{sw}" height="{sb-st}" rx="{sw/2}" fill="{CINNABAR}"/>')
-    rects.append(f'<rect x="{sx2}" y="{st}" width="{sw}" height="{sb-st}" rx="{sw/2}" fill="{CINNABAR}"/>')
-    # 顶部点缀圆（朱印）
-    dot_r = s * 0.04
-    rects.append(f'<circle cx="{s*0.80}" cy="{s*0.18}" r="{dot_r}" fill="{OCHRE}"/>')
-
-    return f'''<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="{s}" height="{s}" viewBox="0 0 {s} {s}">
-{''.join(rects)}
+def svg_for(size: int) -> str:
+    # 画布 size x size，实际印章留 8% 边距，圆角矩形。
+    m = size * 0.06
+    seal = size - 2 * m
+    r = seal * 0.18
+    cx = size / 2
+    # 字体大小：印章内约占 62%
+    fs = int(seal * 0.62)
+    # 文字基线（竖直居中）
+    y = size / 2 + fs * 0.36
+    # 金边：印章内缩一点
+    gb = size * 0.035
+    gseal = size - 2 * (m + gb)
+    gr = gseal * 0.18
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}">
+  <rect x="0" y="0" width="{size}" height="{size}" rx="{r:.1f}" ry="{r:.1f}" fill="{PAPER}"/>
+  <rect x="{m:.1f}" y="{m:.1f}" width="{seal:.1f}" height="{seal:.1f}" rx="{r:.1f}" ry="{r:.1f}" fill="{CINNABAR}"/>
+  <rect x="{m+gb:.1f}" y="{m+gb:.1f}" width="{gseal:.1f}" height="{gseal:.1f}" rx="{gr:.1f}" ry="{gr:.1f}" fill="none" stroke="{GOLD}" stroke-width="{size*0.012:.1f}"/>
+  <text x="{cx:.1f}" y="{y:.1f}" font-family="WenQuanYi Zen Hei" font-size="{fs}" fill="{WHITE}" text-anchor="middle" font-weight="bold">{GLYPH}</text>
 </svg>'''
 
 
 def render(svg: str, out_png: str):
-    try:
-        import cairosvg  # noqa
-    except ImportError:
-        pass
-    with open("/tmp/_icon_src.svg", "w", encoding="utf-8") as f:
-        f.write(svg)
-    subprocess.run(
-        ["uvx", "--quiet", "cairosvg", "/tmp/_icon_src.svg", "-o", out_png],
+    p = subprocess.run(
+        ["uvx", "--quiet", "cairosvg", "/dev/stdin", "-o", out_png],
+        input=svg.encode("utf-8"),
         check=True,
-        capture_output=True,
     )
+    if not os.path.exists(out_png) or os.path.getsize(out_png) == 0:
+        raise RuntimeError(f"空输出: {out_png}")
 
 
 def main():
-    for density, size in DENSITIES.items():
-        d = os.path.join(RES, density)
+    os.makedirs(OUT, exist_ok=True)
+    for dens, size in DENS.items():
+        d = os.path.join(OUT, f"mipmap-{dens}")
         os.makedirs(d, exist_ok=True)
-        # 背景层
-        render(svg_bg(size), os.path.join(d, "ic_launcher_background.png"))
-        # 前景层
-        render(svg_fg(size), os.path.join(d, "ic_launcher_foreground.png"))
-        # 完整图标（背景+前景合成）
-        render(bg_fg_combined(size), os.path.join(d, "ic_launcher.png"))
-        render(bg_fg_combined(size, round=False),
-               os.path.join(d, "ic_launcher_round.png"))
-    print("icons generated for:", ", ".join(DENSITIES))
-
-
-def bg_fg_combined(size: int, round: bool = True) -> str:
-    r = size * 0.20 if round else 0
-    cx = size / 2
-    vw = size * 0.085
-    vx = cx - vw / 2
-    vtop, vbot = size * 0.20, size * 0.80
-    hw = size * 0.46
-    hx = cx - hw / 2
-    hh = size * 0.075
-    sw = size * 0.07
-    sx = cx - hw / 2 + size * 0.02
-    sx2 = cx + hw / 2 - sw - size * 0.02
-
-    rects = [f'<rect x="0" y="0" width="{size}" height="{size}" rx="{r}" ry="{r}" fill="{PAPER}"/>']
-    rects.append(f'<rect x="{vx}" y="{vtop}" width="{vw}" height="{vbot-vtop}" rx="{vw/2}" fill="{CINNABAR}"/>')
-    for hy in (size*0.30, size*0.42, size*0.66):
-        rects.append(f'<rect x="{hx}" y="{hy}" width="{hw}" height="{hh}" rx="{hh/2}" fill="{CINNABAR}"/>')
-    rects.append(f'<rect x="{sx}" y="{size*0.70}" width="{sw}" height="{size*0.10}" rx="{sw/2}" fill="{CINNABAR}"/>')
-    rects.append(f'<rect x="{sx2}" y="{size*0.70}" width="{sw}" height="{size*0.10}" rx="{sw/2}" fill="{CINNABAR}"/>')
-    rects.append(f'<circle cx="{size*0.80}" cy="{size*0.18}" r="{size*0.04}" fill="{OCHRE}"/>')
-
-    return f'''<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}">
-{''.join(rects)}
-</svg>'''
+        # 自适应图标三层
+        # 1) background: 纯纸色满铺
+        bg_svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}">'
+                  f'<rect width="{size}" height="{size}" fill="{PAPER}"/></svg>')
+        render(bg_svg, os.path.join(d, "ic_launcher_background.png"))
+        # 2) foreground: 透明底 + 朱砂印章（无纸色块，靠自适应 background 层）
+        fg_m = size * 0.06
+        fg_seal = size - 2 * fg_m
+        fg_r = fg_seal * 0.18
+        fg_cx = size / 2
+        fg_fs = int(fg_seal * 0.62)
+        fg_y = size / 2 + fg_fs * 0.36
+        fg_svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}">'
+                  f'<rect x="{fg_m:.1f}" y="{fg_m:.1f}" width="{fg_seal:.1f}" height="{fg_seal:.1f}" rx="{fg_r:.1f}" ry="{fg_r:.1f}" fill="{CINNABAR}"/>'
+                  f'<text x="{fg_cx:.1f}" y="{fg_y:.1f}" font-family="WenQuanYi Zen Hei" font-size="{fg_fs}" fill="{WHITE}" text-anchor="middle" font-weight="bold">{GLYPH}</text>'
+                  f'</svg>')
+        render(fg_svg, os.path.join(d, "ic_launcher_foreground.png"))
+        # 3) 合成图（ic_launcher.png / ic_launcher_round.png，给 <26 设备）
+        render(svg_for(size), os.path.join(d, "ic_launcher.png"))
+        render(svg_for(size), os.path.join(d, "ic_launcher_round.png"))
+        print(f"  {dens}: {size}px  ok")
 
 
 if __name__ == "__main__":
     main()
+    print("图标生成完成")

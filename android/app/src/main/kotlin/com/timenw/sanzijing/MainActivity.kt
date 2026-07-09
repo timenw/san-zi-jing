@@ -1,18 +1,21 @@
 package com.timenw.sanzijing
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.media.MediaRecorder
-import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import java.io.File
 import java.util.Locale
 
 class MainActivity : FlutterActivity() {
     private val TTS_CHANNEL = "com.timenw.sanzijing/tts"
     private val REC_CHANNEL = "com.timenw.sanzijing/recorder"
+    private val REQ_REC = 1001
 
     private var tts: TextToSpeech? = null
     private var recorder: MediaRecorder? = null
@@ -20,22 +23,47 @@ class MainActivity : FlutterActivity() {
     private var ttsChannel: MethodChannel? = null
     private var speaking = false
 
+    // 录音权限异步请求期间，暂存 MethodChannel 结果，待用户授权后再返回。
+    private var pendingRecResult: MethodChannel.Result? = null
+    private var pendingRecPath: String? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
         // ---- TTS 通道：原生 Android TextToSpeech ----
+        // 关键修复：init 必须等 TextToSpeech 引擎真正就绪（onInit 回调）后才
+        // result.success，否则首次朗读时引擎仍为 null 而静音。
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TTS_CHANNEL)
         ttsChannel = channel
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "init" -> {
+                    if (tts != null) {
+                        result.success(true)
+                        return@setMethodCallHandler
+                    }
                     val rate = (call.argument<Double>("rate") ?: 1.0).toFloat()
-                    initTts(rate)
-                    result.success(null)
+                    tts = TextToSpeech(this) { status ->
+                        if (status == TextToSpeech.SUCCESS) {
+                            tts?.language = Locale.SIMPLIFIED_CHINESE
+                            tts?.setSpeechRate(rate.coerceIn(0.1f, 2.0f))
+                            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                                override fun onStart(utteranceId: String?) {}
+                                override fun onDone(utteranceId: String?) { notifyTtsDone() }
+
+                                @Deprecated("Deprecated in Java")
+                                override fun onError(utteranceId: String?) { notifyTtsDone() }
+                            })
+                            result.success(true)
+                        } else {
+                            tts = null
+                            result.success(false)
+                        }
+                    }
                 }
                 "speak" -> {
-                    speak(call.argument<String>("text") ?: "")
-                    result.success(null)
+                    val ok = speak(call.argument<String>("text") ?: "")
+                    result.success(ok)
                 }
                 "stop" -> {
                     tts?.stop()
@@ -47,6 +75,8 @@ class MainActivity : FlutterActivity() {
         }
 
         // ---- 录音通道：原生 MediaRecorder ----
+        // 关键修复：Android 6.0+ 需在运行时申请 RECORD_AUDIO 权限，否则
+        // MediaRecorder.start() 抛 SecurityException，录音按钮点了无任何反馈。
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, REC_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -54,16 +84,61 @@ class MainActivity : FlutterActivity() {
                     "start" -> {
                         val path = call.argument<String>("path")
                             ?: return@setMethodCallHandler result.error("no_path", "path required", null)
-                        startRecording(path)
-                        result.success(null)
+                        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                            == PackageManager.PERMISSION_GRANTED
+                        ) {
+                            try {
+                                startRecording(path)
+                                result.success(null)
+                            } catch (e: Exception) {
+                                result.error("rec_start_failed", e.message, null)
+                            }
+                        } else {
+                            pendingRecResult = result
+                            pendingRecPath = path
+                            ActivityCompat.requestPermissions(
+                                this,
+                                arrayOf(Manifest.permission.RECORD_AUDIO),
+                                REQ_REC
+                            )
+                        }
                     }
                     "stop" -> {
-                        stopRecording()
-                        result.success(recordingPath)
+                        try {
+                            val p = stopRecording()
+                            result.success(p)
+                        } catch (e: Exception) {
+                            result.error("rec_stop_failed", e.message, null)
+                        }
                     }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_REC) {
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED &&
+                pendingRecPath != null
+            ) {
+                try {
+                    startRecording(pendingRecPath!!)
+                    pendingRecResult?.success(null)
+                } catch (e: Exception) {
+                    pendingRecResult?.error("rec_start_failed", e.message, null)
+                }
+            } else {
+                pendingRecResult?.error("permission_denied", "需要麦克风权限才能录音", null)
+            }
+            pendingRecResult = null
+            pendingRecPath = null
+        }
     }
 
     // 由 UtteranceProgressListener 在朗读完毕后回调 Flutter（通知 onDone），
@@ -74,32 +149,11 @@ class MainActivity : FlutterActivity() {
         ttsChannel?.invokeMethod("onDone", null)
     }
 
-    // ---------- TTS ----------
-    private fun initTts(rate: Float) {
-        if (tts != null) return
-        tts = TextToSpeech(this) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.SIMPLIFIED_CHINESE
-                tts?.setSpeechRate(rate.coerceIn(0.1f, 2.0f))
-                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {}
-                    override fun onDone(utteranceId: String?) {
-                        notifyTtsDone()
-                    }
-
-                    @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) {
-                        notifyTtsDone()
-                    }
-                })
-            }
-        }
-    }
-
-    private fun speak(text: String) {
-        if (tts == null) initTts(0.6f)
+    private fun speak(text: String): Boolean {
+        val t = tts ?: return false
         speaking = true
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sanzi")
+        t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sanzi")
+        return true
     }
 
     // ---------- Recorder ----------

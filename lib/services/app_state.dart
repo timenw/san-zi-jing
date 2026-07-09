@@ -59,8 +59,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> _initTts() async {
     try {
-      await _tts.invokeMethod('init', {'rate': 0.6});
-      _ttsReady = true;
+      // 原生端现在会等 TextToSpeech 引擎真正就绪才返回（true/false）。
+      final ok = await _tts.invokeMethod<bool>('init', {'rate': 0.6});
+      _ttsReady = ok == true;
     } on PlatformException {
       _ttsReady = false;
     }
@@ -116,6 +117,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// 录音（家长或孩子），按 verse.id 独立保存。
+  /// 抛出的异常会向上传播，由 UI 层捕获并提示用户（如未授权麦克风）。
   Future<String> startRecording(String who, String verseId) async {
     if (!_recReady) await _initRecorder();
     if (!_recReady) {
@@ -123,6 +125,7 @@ class AppState extends ChangeNotifier {
     }
     final dir = await getApplicationDocumentsDirectory();
     final path = '${dir.path}/${who}_$verseId.m4a';
+    // 原生端在 Android 6.0+ 会弹出权限请求，用户拒绝时抛异常。
     await _rec.invokeMethod('start', {'path': path});
     return path;
   }

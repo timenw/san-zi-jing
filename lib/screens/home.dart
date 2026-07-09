@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/app_state.dart';
 import '../models/san_zi_jing.dart';
@@ -324,7 +325,23 @@ class _VerseTileState extends State<VerseTile> {
                 FilledButton.icon(
                   icon: const Icon(Icons.volume_up, size: 18),
                   label: const Text('AI朗读'),
-                  onPressed: () => state.speakAi(widget.verse.speakText),
+                  onPressed: () async {
+                    try {
+                      final ok = await state.speakAi(widget.verse.speakText);
+                      if (!ok && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('该设备暂不支持 AI 朗读（TTS 不可用）')),
+                        );
+                      }
+                    } on PlatformException catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('朗读失败：${e.message}')),
+                        );
+                      }
+                    }
+                  },
                   style: FilledButton.styleFrom(
                     backgroundColor: GuoFeng.cinnabar,
                     foregroundColor: GuoFeng.paper,
@@ -346,11 +363,27 @@ class _VerseTileState extends State<VerseTile> {
                   label: Text(_recording ? '停止' : '录音'),
                   onPressed: () async {
                     if (_recording) {
-                      await state.stopRecording(_recWho, id);
-                      setState(() => _recording = false);
+                      try {
+                        await state.stopRecording(_recWho, id);
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('停止录音失败：$e')),
+                          );
+                        }
+                      }
+                      if (mounted) setState(() => _recording = false);
                     } else {
-                      await state.startRecording(_recWho, id);
-                      setState(() => _recording = true);
+                      try {
+                        await state.startRecording(_recWho, id);
+                        if (mounted) setState(() => _recording = true);
+                      } on PlatformException catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('无法录音：${e.message}')),
+                          );
+                        }
+                      }
                     }
                   },
                   style: FilledButton.styleFrom(
