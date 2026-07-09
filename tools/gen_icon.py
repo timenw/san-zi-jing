@@ -1,133 +1,120 @@
 #!/usr/bin/env python3
-"""生成童趣 + 三字经主题图标（圆润书卷 + 三颗彩点隐喻「三」+ 小星星）。
+"""Generate a playful (童趣) app icon for 亲子三字经.
 
-依赖: uvx cairosvg（无需 PIL/Flutter SDK）。
-配色：米黄纸底 + 圆润书卷(朱砂/竹青/赭石) + 童趣高饱和点缀。
+Produces, for each density (mdpi..xxxhdpi):
+  ic_launcher.png           full composed icon (square)
+  ic_launcher_round.png     same (round fallback)
+  ic_launcher_background.png  adaptive background layer
+  ic_launcher_foreground.png  adaptive foreground layer (transparent)
+
+Renders via cairosvg (uvx) with the WenQuanYi Zen Hei CJK font for 「三」.
 """
 import os
 import subprocess
 
+RES = "/root/san-zi-jing/android/app/src/main/res"
 FONT = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
-OUT = "/root/san-zi-jing/android/app/src/main/res"
 
-# 童趣明快配色
-PAPER = "#FFF8EC"      # 暖米黄纸底
-CINNABAR = "#E5573F"   # 明亮朱砂（书卷主色）
-BAMBOO = "#5BAE8E"     # 竹青（卷边）
-OCHRE = "#F2B441"      # 赭石金（点缀/星）
-INK = "#3A2E25"        # 墨色（卷上文字）
-SKY = "#7FB5E6"        # 童趣蓝（小点）
-PINK = "#F08FB0"       # 童趣粉（小点）
+DENSITIES = {
+    "mipmap-mdpi": 48,
+    "mipmap-hdpi": 72,
+    "mipmap-xhdpi": 96,
+    "mipmap-xxhdpi": 144,
+    "mipmap-xxxhdpi": 192,
+}
 
-DENS = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
+# 童趣配色
+CREAM_TOP = "#FDF3DF"
+CREAM_BOT = "#F8E2BC"
+BAMBOO = "#6E8B6B"
+CINNABAR = "#B5402F"
+SUN = "#F6B94A"
+INK = "#5A3E1B"
+PAPER = "#FFFDF8"
+STAR = "#8FB38B"
+
+# ---- 背景层：暖米黄渐变 + 竹青内描边 ----
+BG = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="{CREAM_TOP}"/>
+      <stop offset="1" stop-color="{CREAM_BOT}"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="192" height="192" fill="url(#bg)"/>
+  <rect x="13" y="13" width="166" height="166" rx="40"
+        fill="none" stroke="{BAMBOO}" stroke-width="6" opacity="0.55"/>
+</svg>"""
+
+# ---- 前景层：笑脸太阳 + 童书 + 朱砂「三」+ 小星（透明底） ----
+FG = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <!-- 小星 1 -->
+  <g fill="{STAR}" opacity="0.9">
+    <path d="M52 50 l4 9 10 1 -7 7 2 10 -9 -5 -9 5 2 -10 -7 -7 10 -1 z"/>
+  </g>
+  <!-- 小星 2 -->
+  <g fill="{STAR}" opacity="0.8">
+    <path d="M50 138 l3 7 8 1 -6 6 2 8 -7 -4 -7 4 2 -8 -6 -6 8 -1 z"/>
+  </g>
+  <!-- 笑脸太阳 -->
+  <g>
+    <circle cx="142" cy="54" r="19" fill="{SUN}"/>
+    <circle cx="136" cy="50" r="2.6" fill="{INK}"/>
+    <circle cx="148" cy="50" r="2.6" fill="{INK}"/>
+    <path d="M135 58 q7 7 14 0" fill="none" stroke="{INK}" stroke-width="2.4"
+          stroke-linecap="round"/>
+    <circle cx="130" cy="60" r="3" fill="#F2925E" opacity="0.7"/>
+    <circle cx="154" cy="60" r="3" fill="#F2925E" opacity="0.7"/>
+  </g>
+  <!-- 童书：两页翻开 -->
+  <g>
+    <path d="M96 78 C78 70 56 70 40 80 L40 150 C56 140 78 140 96 148 Z"
+          fill="{PAPER}" stroke="{BAMBOO}" stroke-width="3"/>
+    <path d="M96 78 C114 70 136 70 152 80 L152 150 C136 140 114 140 96 148 Z"
+          fill="{PAPER}" stroke="{BAMBOO}" stroke-width="3"/>
+    <path d="M96 78 L96 148" stroke="{BAMBOO}" stroke-width="3"/>
+    <!-- 书页上的小横线 -->
+    <path d="M52 96 h30 M52 106 h30 M52 116 h26" stroke="{BAMBOO}"
+          stroke-width="2.4" stroke-linecap="round" opacity="0.6"/>
+    <path d="M110 96 h30 M110 106 h30 M110 116 h26" stroke="{BAMBOO}"
+          stroke-width="2.4" stroke-linecap="round" opacity="0.6"/>
+  </g>
+  <!-- 朱砂红大字「三」浮在书上 -->
+  <text x="96" y="128" font-family="WenQuanYi Zen Hei" font-weight="bold"
+        font-size="58" fill="{CINNABAR}" text-anchor="middle"
+        dominant-baseline="middle">三</text>
+</svg>"""
+
+# ---- 合成图标：背景 + 前景叠加 ----
+COMBINED = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  {BG.replace('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">','').replace('</svg>','')}
+  {FG.replace('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">','').replace('</svg>','')}
+</svg>"""
 
 
-def svg_for(size: int) -> str:
-    s = size
-    cx = s / 2
-    # 圆角纸底
-    r = s * 0.22
-    # 书卷：横向圆角矩形作卷身，上下两条卷边（椭圆）
-    book_w = s * 0.62
-    book_h = s * 0.46
-    bx = cx - book_w / 2
-    by = cx - book_h / 2 + s * 0.03
-    br = book_h * 0.32
-    # 三颗彩点（隐喻「三」字经）：红/蓝/粉，排在书卷上方弧线
-    dot_r = s * 0.052
-    dot_y = by - s * 0.10
-    dots = [
-        (cx - s * 0.16, CINNABAR),
-        (cx, OCHRE),
-        (cx + s * 0.16, PINK),
-    ]
-    # 书卷上的「三」字（用真实字体）或「经」？用「经」字更直接点题三字经
-    fs = int(book_h * 0.66)
-    ty = by + book_h / 2 + fs * 0.34
-    # 小星星（童趣）
-    star = _star(cx + s * 0.30, by - s * 0.02, s * 0.05)
-    star2 = _star(cx - s * 0.32, by + s * 0.14, s * 0.035)
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{s}" height="{s}" viewBox="0 0 {s} {s}">',
-        f'<rect x="0" y="0" width="{s}" height="{s}" rx="{r:.1f}" ry="{r:.1f}" fill="{PAPER}"/>',
-    ]
-    for (dx, dc) in dots:
-        parts.append(f'<circle cx="{dx:.1f}" cy="{dot_y:.1f}" r="{dot_r:.1f}" fill="{dc}"/>')
-    parts.append(f'<g>{star}{star2}</g>')
-    # 书卷卷边（上下椭圆）
-    parts.append(f'<ellipse cx="{cx:.1f}" cy="{by:.1f}" rx="{book_w/2:.1f}" ry="{br:.1f}" fill="{BAMBOO}"/>')
-    parts.append(f'<rect x="{bx:.1f}" y="{by:.1f}" width="{book_w:.1f}" height="{book_h:.1f}" fill="{CINNABAR}"/>')
-    parts.append(f'<ellipse cx="{cx:.1f}" cy="{by+book_h:.1f}" rx="{book_w/2:.1f}" ry="{br:.1f}" fill="{BAMBOO}"/>')
-    # 「经」字
-    parts.append(f'<text x="{cx:.1f}" y="{ty:.1f}" font-family="WenQuanYi Zen Hei" font-size="{fs}" fill="{INK}" text-anchor="middle" font-weight="bold">经</text>')
-    parts.append('</svg>')
-    return "".join(parts)
-
-
-def _star(cx, cy, r):
-    import math
-    pts = []
-    for i in range(10):
-        ang = math.pi / 2 + i * math.pi / 5
-        rad = r if i % 2 == 0 else r * 0.45
-        pts.append(f"{cx + rad*math.cos(ang):.1f},{cy - rad*math.sin(ang):.1f}")
-    return f'<polygon points="{" ".join(pts)}" fill="{OCHRE}"/>'
-
-
-def render(svg: str, out_png: str):
-    p = subprocess.run(
-        ["uvx", "--quiet", "cairosvg", "/dev/stdin", "-o", out_png],
-        input=svg.encode("utf-8"),
+def render(svg, out_path, size):
+    tmp = out_path + ".tmp.svg"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(svg)
+    subprocess.run(
+        ["uvx", "--quiet", "cairosvg", tmp, "-o", out_path, "-W", str(size),
+         "-H", str(size)],
         check=True,
     )
-    if not os.path.exists(out_png) or os.path.getsize(out_png) == 0:
-        raise RuntimeError(f"空输出: {out_png}")
+    os.remove(tmp)
 
 
 def main():
-    for dens, size in DENS.items():
-        d = os.path.join(OUT, f"mipmap-{dens}")
-        os.makedirs(d, exist_ok=True)
-        # background：纯纸色（自适应图标用）
-        bg_svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}">'
-                  f'<rect width="{size}" height="{size}" rx="{size*0.22:.1f}" fill="{PAPER}"/></svg>')
-        render(bg_svg, os.path.join(d, "ic_launcher_background.png"))
-        # foreground：透明底 + 书卷+三彩点+星+经字（自适应图标前景层）
-        fg = _foreground(size)
-        render(fg, os.path.join(d, "ic_launcher_foreground.png"))
-        # 合成图（<26 设备）
-        render(svg_for(size), os.path.join(d, "ic_launcher.png"))
-        render(svg_for(size), os.path.join(d, "ic_launcher_round.png"))
-        print(f"  {dens}: {size}px ok")
-
-
-def _foreground(size: int) -> str:
-    s = size
-    cx = s / 2
-    book_w = s * 0.62
-    book_h = s * 0.46
-    bx = cx - book_w / 2
-    by = cx - book_h / 2 + s * 0.03
-    br = book_h * 0.32
-    dot_r = s * 0.052
-    dot_y = by - s * 0.10
-    dots = [(cx - s * 0.16, CINNABAR), (cx, OCHRE), (cx + s * 0.16, PINK)]
-    fs = int(book_h * 0.66)
-    ty = by + book_h / 2 + fs * 0.34
-    star = _star(cx + s * 0.30, by - s * 0.02, s * 0.05)
-    star2 = _star(cx - s * 0.32, by + s * 0.14, s * 0.035)
-    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{s}" height="{s}" viewBox="0 0 {s} {s}">']
-    for (dx, dc) in dots:
-        parts.append(f'<circle cx="{dx:.1f}" cy="{dot_y:.1f}" r="{dot_r:.1f}" fill="{dc}"/>')
-    parts.append(f'<g>{star}{star2}</g>')
-    parts.append(f'<ellipse cx="{cx:.1f}" cy="{by:.1f}" rx="{book_w/2:.1f}" ry="{br:.1f}" fill="{BAMBOO}"/>')
-    parts.append(f'<rect x="{bx:.1f}" y="{by:.1f}" width="{book_w:.1f}" height="{book_h:.1f}" fill="{CINNABAR}"/>')
-    parts.append(f'<ellipse cx="{cx:.1f}" cy="{by+book_h:.1f}" rx="{book_w/2:.1f}" ry="{br:.1f}" fill="{BAMBOO}"/>')
-    parts.append(f'<text x="{cx:.1f}" y="{ty:.1f}" font-family="WenQuanYi Zen Hei" font-size="{fs}" fill="{INK}" text-anchor="middle" font-weight="bold">经</text>')
-    parts.append('</svg>')
-    return "".join(parts)
+    for d, size in DENSITIES.items():
+        ddir = os.path.join(RES, d)
+        assert os.path.isdir(ddir), ddir
+        render(BG, os.path.join(ddir, "ic_launcher_background.png"), size)
+        render(FG, os.path.join(ddir, "ic_launcher_foreground.png"), size)
+        render(COMBINED, os.path.join(ddir, "ic_launcher.png"), size)
+        render(COMBINED, os.path.join(ddir, "ic_launcher_round.png"), size)
+        print(f"rendered {d} ({size}px)")
+    print("DONE")
 
 
 if __name__ == "__main__":
     main()
-    print("童趣图标生成完成")
