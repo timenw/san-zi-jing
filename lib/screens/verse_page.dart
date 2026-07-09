@@ -29,6 +29,8 @@ class _VersePageState extends State<VersePage> {
 
   void _goTo(int newIndex) {
     if (newIndex < 0 || newIndex >= widget.section.verses.length) return;
+    // 翻页前停止当前朗读，避免上一句声音串到下一页。
+    Provider.of<AppState>(context, listen: false).stopAudio();
     // 用替换方式翻页，避免栈无限增长。
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
