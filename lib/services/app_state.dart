@@ -8,14 +8,9 @@ import '../models/san_zi_jing.dart';
 
 enum PlayState { stopped, playing, paused }
 
-/// AI 配音结果状态。
-enum SpeakResult { ok, noEngine, noChinese }
-
-/// AI 配音走原生 Android TextToSpeech（平台通道），避免 flutter_tts 旧插件
-/// 在 Flutter 现代 Gradle 插件加载器下不兼容；其余平台安全降级为无操作。
-/// 同时管理「已读 / 已录」学习进度，持久化到 SharedPreferences。
+/// 朗读来源：预录语音包（assets/audio 内每句一个 mp3）。
+/// 不再依赖设备原生 TTS，所有平台一致发音、离线可用。
 class AppState extends ChangeNotifier {
-  static const _tts = MethodChannel('com.timenw.sanzijing/tts');
   static const _rec = MethodChannel('com.timenw.sanzijing/recorder');
   final AudioPlayer player = AudioPlayer();
 
@@ -23,13 +18,35 @@ class AppState extends ChangeNotifier {
   final Map<String, String> _childRecs = {};
   final Map<String, String> _parentRecs = {};
 
-  bool _ttsReady = false;
-  bool _zhReady = false; // 中文语音包是否可用（很多设备引擎就绪却缺中文语音）
   bool _recReady = false;
 
   // 学习进度：以句子稳定 id 为 key
   final Set<String> _readVerses = {};
   final Set<String> _recordedVerses = {};
+
+  PlayState _playState = PlayState.stopped;
+  String? _playingVerseId; // 正在播放朗读的句子 id
+
+  AppState() {
+    _initRecorder();
+    player.playerStateStream.listen((st) {
+      if (st.processingState == ProcessingState.completed) {
+        _playState = PlayState.stopped;
+        _playingVerseId = null;
+        notifyListeners();
+      } else if (st.playing) {
+        _playState = PlayState.playing;
+        notifyListeners();
+      } else if (st.processingState == ProcessingState.ready) {
+        _playState = PlayState.paused;
+        notifyListeners();
+      }
+    });
+  }
+
+  String? get playingVerseId => _playingVerseId;
+  bool get isPlaying => _playState == PlayState.playing;
+  bool isPlayingVerse(String id) => _playState == PlayState.playing && _playingVerseId == id;
 
   String? childPathOf(String id) => _childRecs[id];
   String? parentPathOf(String id) => _parentRecs[id];
@@ -56,24 +73,6 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  AppState() {
-    _initTts();
-    _initRecorder();
-  }
-
-  Future<void> _initTts() async {
-    try {
-      // 原生返回 {'tts': 引擎就绪?, 'zh': 中文语音可用?}
-      final r = await _tts.invokeMethod<Map<dynamic, dynamic>>(
-          'init', {'rate': 0.6});
-      _ttsReady = r?['tts'] == true;
-      _zhReady = r?['zh'] == true;
-    } on PlatformException {
-      _ttsReady = false;
-      _zhReady = false;
-    }
-  }
-
   Future<void> _initRecorder() async {
     try {
       await _rec.invokeMethod('init');
@@ -83,55 +82,39 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// AI 配音：经原生 TTS 朗读指定句子。
-  /// 返回 ok=已发起；noEngine=设备无 TTS 引擎；noChinese=缺中文语音包。
-  Future<SpeakResult> speakAi(String text) async {
-    if (!_ttsReady) await _initTts();
-    if (!_ttsReady) return SpeakResult.noEngine;
-    if (!_zhReady) return SpeakResult.noChinese;
+  /// 朗读指定句子：播放预录语音包 assets/audio/<id>.mp3。
+  /// 返回 true=已发起播放；false=该句音频资源缺失。
+  Future<bool> playVerse(String id) async {
+    await player.stop();
     try {
-      await _tts.invokeMethod('speak', {'text': text});
-      return SpeakResult.ok;
-    } on PlatformException {
-      return SpeakResult.noEngine;
+      await player.setAsset('assets/audio/$id.mp3');
+    } on Exception {
+      return false;
     }
-  }
-
-  /// 跳转系统 TTS 设置（引导安装中文语音包）。
-  Future<void> openTtsSettings() async {
+    _playingVerseId = id;
+    _playState = PlayState.playing;
+    notifyListeners();
     try {
-      await _tts.invokeMethod('openSettings');
-    } on PlatformException {
-      // 设备无该设置页，忽略
+      await player.play();
+    } on Exception {
+      // 播放失败，重置状态
+      _playState = PlayState.stopped;
+      _playingVerseId = null;
+      notifyListeners();
+      return false;
     }
+    return true;
   }
 
-  /// 注册 TTS 完成回调（原生朗读结束时触发），用于顺序三轨。
-  void onTtsDone(Future<void> Function() cb) {
-    _ttsDone = cb;
-    _ensureTtsCallbackRegistered();
-  }
-
-  Future<void> Function()? _ttsDone;
-  bool _ttsCbRegistered = false;
-
-  void _ensureTtsCallbackRegistered() {
-    if (_ttsCbRegistered) return;
-    _ttsCbRegistered = true;
-    _tts.setMethodCallHandler((call) async {
-      if (call.method == 'onDone') {
-        await _ttsDone?.call();
-      }
-      return;
-    });
-  }
-
-  Future<void> stopAi() async {
+  Future<void> stopAudio() async {
     try {
-      await _tts.invokeMethod('stop');
-    } on PlatformException {
+      await player.stop();
+    } on Exception {
       // ignore
     }
+    _playState = PlayState.stopped;
+    _playingVerseId = null;
+    notifyListeners();
   }
 
   /// 录音（家长或孩子），按 verse.id 独立保存。
@@ -200,26 +183,14 @@ class AppState extends ChangeNotifier {
     return out;
   }
 
-  /// 三轨对比：AI 朗读 ->（可选）家长录音 -> 孩子录音，依次播放。
-  /// 用原生 TTS 完成回调串联，避免时长估算误差。
+  /// 三轨对比：预录朗读 ->（可选）家长录音 -> 孩子录音，依次播放。
   Future<void> playCompare(String verseId, {bool hasParent = false}) async {
-    await stopCompare();
-    final verse = SanZiJingData.verseById(verseId);
+    await stopAudio();
     final childPath = _childRecs[verseId];
     final parentPath = _parentRecs[verseId];
 
     final queue = <Future<void> Function()>[];
-    queue.add(() async {
-      final ok = await speakAi(verse.speakText);
-      // 若原生 TTS 不可用（非 Android 或缺中文语音），直接跳过该段。
-      final completer = Completer<void>();
-      if (ok != SpeakResult.ok) {
-        completer.complete();
-      } else {
-        onTtsDone(() async => completer.complete());
-      }
-      await completer.future;
-    });
+    queue.add(() => _playAssetThen(verseId, null));
     if (hasParent && parentPath != null) {
       queue.add(() => _playFileThen(parentPath, null));
     }
@@ -227,6 +198,24 @@ class AppState extends ChangeNotifier {
       queue.add(() => _playFileThen(childPath, null));
     }
     await _runQueue(queue);
+  }
+
+  Future<void> _playAssetThen(String id, void Function()? after) async {
+    final ok = await playVerse(id);
+    if (!ok) {
+      after?.call();
+      return;
+    }
+    final done = Completer<void>();
+    late final StreamSubscription sub;
+    sub = player.playerStateStream.listen((st) {
+      if (st.processingState == ProcessingState.completed) {
+        sub.cancel();
+        done.complete();
+      }
+    });
+    await done.future;
+    after?.call();
   }
 
   Future<void> _playFileThen(String path, void Function()? after) async {
@@ -246,6 +235,7 @@ class AppState extends ChangeNotifier {
     } on Exception {
       // 文件可能已失效，忽略
     }
+    after?.call();
   }
 
   Future<void> _runQueue(List<Future<void> Function()> queue) async {
@@ -260,21 +250,16 @@ class AppState extends ChangeNotifier {
     if (path == null) return;
     await player.stop();
     await player.setFilePath(path);
+    _playingVerseId = null;
     await player.play();
   }
 
   Future<void> stopCompare() async {
-    await stopAi();
-    try {
-      await player.stop();
-    } on Exception {
-      // ignore
-    }
+    await stopAudio();
   }
 
   @override
   void dispose() {
-    stopAi();
     try {
       _rec.invokeMethod('stop');
     } on PlatformException {
